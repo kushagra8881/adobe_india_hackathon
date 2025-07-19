@@ -33,19 +33,38 @@ class ModelManager:
         self.models_dir = Path(models_dir)
         self.models_dir.mkdir(parents=True, exist_ok=True)
         
-        # Model configurations
+        # Optimized Model configurations (Total: ~490MB with NLTK < 700MB limit)
         self.model_configs = {
-            "sentence_transformer": {
+            "sentence_transformer_best": {
+                "name": "all-MiniLM-L12-v2",
+                "alternative": "sentence-transformers/all-MiniLM-L12-v2", 
+                "size_mb": 120,
+                "description": "Best accuracy-to-size ratio sentence embedding model"
+            },
+            "sentence_transformer_qa": {
+                "name": "multi-qa-MiniLM-L6-cos-v1",
+                "alternative": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1",
+                "size_mb": 90,
+                "description": "Optimized for question-answering tasks"
+            },
+            "sentence_transformer_domain": {
+                "name": "msmarco-MiniLM-L6-cos-v5", 
+                "alternative": "sentence-transformers/msmarco-MiniLM-L6-cos-v5",
+                "size_mb": 90,
+                "description": "Optimized for document retrieval and ranking"
+            },
+            "sentence_transformer_fast": {
                 "name": "all-MiniLM-L6-v2",
                 "alternative": "sentence-transformers/paraphrase-MiniLM-L6-v2",
                 "size_mb": 90,
-                "description": "Lightweight sentence embedding model"
+                "description": "Fast processing lightweight model"
             },
-            "sentence_transformer_large": {
-                "name": "all-mpnet-base-v2", 
-                "alternative": "sentence-transformers/all-MiniLM-L12-v2",
-                "size_mb": 420,
-                "description": "More accurate sentence embedding model"
+            # Legacy compatibility
+            "sentence_transformer": {
+                "name": "all-MiniLM-L6-v2",
+                "alternative": "sentence-transformers/paraphrase-MiniLM-L6-v2", 
+                "size_mb": 90,
+                "description": "Default lightweight model (legacy)"
             }
         }
         
@@ -164,14 +183,39 @@ class ModelManager:
     
     def get_system_info(self) -> Dict[str, Any]:
         """Get system information for model selection."""
+        total_size = sum(config["size_mb"] for config in self.model_configs.values())
         return {
             "torch_available": torch.cuda.is_available() if hasattr(torch, 'cuda') else False,
             "torch_version": torch.__version__ if 'torch' in sys.modules else None,
             "python_version": sys.version,
             "platform": sys.platform,
             "models_dir": str(self.models_dir),
-            "available_models": [k for k in self.model_configs.keys() if self.is_model_downloaded(k)]
+            "available_models": [k for k in self.model_configs.keys() if self.is_model_downloaded(k)],
+            "total_model_size_mb": total_size,
+            "model_configs": self.model_configs
         }
+    
+    def get_best_model_for_task(self, task_type: str = "general") -> str:
+        """
+        Get the best model for a specific task type.
+        
+        Args:
+            task_type: Type of task ('general', 'qa', 'domain', 'fast')
+            
+        Returns:
+            Model key for the best suited model
+        """
+        task_mapping = {
+            "general": "sentence_transformer_best",
+            "qa": "sentence_transformer_qa", 
+            "question_answering": "sentence_transformer_qa",
+            "domain": "sentence_transformer_domain",
+            "retrieval": "sentence_transformer_domain",
+            "fast": "sentence_transformer_fast",
+            "speed": "sentence_transformer_fast"
+        }
+        
+        return task_mapping.get(task_type, "sentence_transformer_best")
     
     def cleanup_old_models(self, keep_latest: int = 2):
         """Clean up old model versions to save disk space."""
@@ -179,46 +223,94 @@ class ModelManager:
         # Implementation for cleaning up old models if needed
         pass
     
+    def setup_enhanced_models(self):
+        """
+        Download and setup the optimized enhanced model suite.
+        Total size: ~490MB with NLTK < 700MB limit
+        """
+        logger.info("Setting up enhanced optimized model suite...")
+        
+        # Download NLTK data first
+        self.download_nltk_data()
+        
+        # Download all optimized models
+        enhanced_models = [
+            "sentence_transformer_best",    # 120MB - Best accuracy
+            "sentence_transformer_qa",      # 90MB - Q&A optimized
+            "sentence_transformer_domain",  # 90MB - Domain retrieval
+            "sentence_transformer_fast"     # 90MB - Fast processing
+        ]
+        
+        for model_key in enhanced_models:
+            try:
+                self.download_sentence_transformer(model_key)
+                logger.info(f"✅ Successfully setup {model_key}")
+            except Exception as e:
+                logger.error(f"❌ Failed to setup {model_key}: {e}")
+        
+        logger.info("Enhanced model suite setup complete!")
+        
+        # Print system info
+        info = self.get_system_info()
+        logger.info(f"Enhanced System Info: {json.dumps(info, indent=2)}")
+    
     def setup_all_models(self, use_large_models: bool = False):
         """
         Download and setup all required models.
         
         Args:
-            use_large_models: Whether to download larger, more accurate models
+            use_large_models: Whether to use the enhanced model suite
         """
-        logger.info("Setting up all required models...")
-        
-        # Download NLTK data
-        self.download_nltk_data()
-        
-        # Download sentence transformer
-        model_key = "sentence_transformer_large" if use_large_models else "sentence_transformer"
-        self.download_sentence_transformer(model_key)
-        
-        logger.info("All models setup complete!")
-        
-        # Print system info
-        info = self.get_system_info()
-        logger.info(f"System info: {json.dumps(info, indent=2)}")
+        if use_large_models:
+            self.setup_enhanced_models()
+        else:
+            logger.info("Setting up basic models...")
+            
+            # Download NLTK data
+            self.download_nltk_data()
+            
+            # Download basic sentence transformer
+            self.download_sentence_transformer("sentence_transformer_fast")
+            
+            logger.info("Basic models setup complete!")
+            
+            # Print system info
+            info = self.get_system_info()
+            logger.info(f"System info: {json.dumps(info, indent=2)}")
 
 if __name__ == "__main__":
-    """Test the model manager."""
+    """Enhanced Model Manager CLI."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Model Manager")
+    parser = argparse.ArgumentParser(description="Enhanced Model Manager for Document Intelligence")
     parser.add_argument("--setup", action="store_true", help="Setup all models")
-    parser.add_argument("--large", action="store_true", help="Use larger models")
+    parser.add_argument("--enhanced", action="store_true", help="Use enhanced model suite (recommended)")
     parser.add_argument("--info", action="store_true", help="Show system info")
     parser.add_argument("--models-dir", type=str, default="./models", help="Models directory")
+    parser.add_argument("--task", type=str, choices=["general", "qa", "domain", "fast"], 
+                       help="Get best model for specific task")
     
     args = parser.parse_args()
     
     manager = ModelManager(args.models_dir)
     
     if args.setup:
-        manager.setup_all_models(use_large_models=args.large)
+        if args.enhanced:
+            manager.setup_enhanced_models()
+        else:
+            manager.setup_all_models(use_large_models=args.enhanced)
     elif args.info:
         info = manager.get_system_info()
         print(json.dumps(info, indent=2))
+    elif args.task:
+        best_model = manager.get_best_model_for_task(args.task)
+        print(f"Best model for '{args.task}' task: {best_model}")
+        print(f"Model details: {manager.model_configs[best_model]}")
     else:
-        print("Use --setup to download models or --info to show system information")
+        print("Enhanced Model Manager for Document Intelligence System")
+        print("Usage:")
+        print("  --setup --enhanced    Setup optimized model suite (recommended)")
+        print("  --setup               Setup basic models")
+        print("  --info                Show system information")
+        print("  --task <type>         Show best model for task type")
+        print("\nTotal enhanced model size: ~490MB (under 700MB limit)")

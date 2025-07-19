@@ -9,14 +9,13 @@
             "South of France - Tips and Tricks.pdf",
             "South of France - Traditions and Culture.pdf"
         ],
-        "persona": "a travel enthusiast",
-        "job_to_be_done": "planning a trip to South of France",
-        "processing_timestamp": "2025-07-17T18:39:07.009614",
-        "processing_time_seconds": 2.0,
+        "persona": "travel planner",
+        "job_to_be_done": "plan trip",
+        "processing_timestamp": "2025-07-19T21:53:53.500874",
+        "processing_time_seconds": 14.78,
         "system_info": {
             "models_used": {
                 "sentence_transformer": "locally_cached",
-                "use_large_models": false,
                 "use_ocr": true
             },
             "documents_processed": 7,
@@ -25,86 +24,86 @@
     },
     "extracted_sections": [
         {
-            "document": "South of France - Things to Do.pdf",
+            "document": "South of France - Tips and Tricks.pdf",
             "section_title": "Page 1",
             "importance_rank": 1,
             "page_number": 1,
-            "relevance_score": 0.9112032527853935,
-            "similarity_score": 0.7112032527853934,
+            "relevance_score": 0.7228298254182166,
+            "similarity_score": 0.5228298254182167,
+            "content_bonus": 0.2
+        },
+        {
+            "document": "South of France - Things to Do.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 2,
+            "page_number": 1,
+            "relevance_score": 0.4044215330901002,
+            "similarity_score": 0.20442153309010017,
+            "content_bonus": 0.2
+        },
+        {
+            "document": "South of France - Restaurants and Hotels.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 3,
+            "page_number": 1,
+            "relevance_score": 0.3899991129709811,
+            "similarity_score": 0.18999911297098107,
             "content_bonus": 0.2
         },
         {
             "document": "South of France - Cities.pdf",
             "section_title": "Page 1",
-            "importance_rank": 2,
+            "importance_rank": 4,
             "page_number": 1,
-            "relevance_score": 0.8519336427782374,
-            "similarity_score": 0.6519336427782373,
-            "content_bonus": 0.2
+            "relevance_score": 0.3177298870810889,
+            "similarity_score": 0.1477298870810889,
+            "content_bonus": 0.17
         },
         {
             "document": "South of France - History.pdf",
-            "section_title": "Page 1",
-            "importance_rank": 3,
-            "page_number": 1,
-            "relevance_score": 0.8020937462225103,
-            "similarity_score": 0.7120937462225103,
-            "content_bonus": 0.08999999999999998
-        },
-        {
-            "document": "South of France - Tips and Tricks.pdf",
-            "section_title": "Page 1",
-            "importance_rank": 4,
-            "page_number": 1,
-            "relevance_score": 0.7964469253976829,
-            "similarity_score": 0.5964469253976828,
-            "content_bonus": 0.2
-        },
-        {
-            "document": "South of France - Cuisine.pdf",
-            "section_title": "Page 1",
+            "section_title": "Arles: A Roman Treasure Arles, located on the banks of the Rhône River, is renowned for its Roman and Romanesque monuments. The city was an important Roman settlement and later became a center of Christian pilgrimage. Key Historical Sites in Arles • Arles Amphitheatre: This Roman amphitheater, built in the 1st century AD, is still used for events such as bullfights and concerts. It is one of the best-preserved Roman structures in France. • Church of St. Trophime: This Romanesque church, built in the 12th century, is known for its stunning portal and cloister. It was an important stop on the pilgrimage route to Santiago de Compostela. • Alyscamps: This ancient Roman necropolis, located just outside the city walls, was a major burial site in antiquity. It features a long avenue lined with sarcophagi. • Thermes de Constantin: These Roman baths, built in the 4th century AD, are a testament to the city's importance during the Roman period. • Van Gogh's Influence: Arles is also famous for its association with Vincent van Gogh, who created over 300 works of art during his time in the city. The Van Gogh Foundation in Arles celebrates his legacy. • Cryptoporticus: An underground gallery built by the Romans in the 1st century BC, it served as a foundation for the Forum and is one of the few remaining examples of such structures.",
             "importance_rank": 5,
-            "page_number": 1,
-            "relevance_score": 0.777212327907076,
-            "similarity_score": 0.577212327907076,
+            "page_number": 8,
+            "relevance_score": 0.3005209525308241,
+            "similarity_score": 0.10052095253082412,
             "content_bonus": 0.2
         }
     ],
     "subsection_analysis": [
         {
-            "document": "South of France - Things to Do.pdf",
-            "refined_text": "Ultimate Guide to Activities and Things to Do in the South of France Introduction The South of France, with its stunning coastline, picturesque villages, and vibrant cities, oﬀers a wealth of activities and experiences for travelers. This guide will take you through a variety of activities and must-see attractions to help you plan an unforgettable trip. Outdoor Activities The diverse landscapes of the South of France oﬀer plenty of opportunities for outdoor adventures: Hiking and Biking • Verdon Gorge: Known as the \"Grand Canyon of Europe,\" oﬀering spectacular hiking trails. Conclusion The South of France is a diverse and enchanting region that oﬀers a wide range of activities and experiences for travelers.",
+            "document": "South of France - Tips and Tricks.pdf",
+            "refined_text": "The Ultimate South of France Travel Companion: Your Comprehensive Guide to Packing, Planning, and Exploring Introduction Planning a trip to the South of France requires thoughtful preparation to ensure a comfortable and enjoyable experience. Whether you're traveling solo, with kids, or in a group, this guide will help you make the most of your trip. • Additional Tips: Download maps and travel guides to your devices for oﬄine use. Conclusion Packing for a trip to the South of France involves considering the season, planned activities, and the needs of both adults and children.",
             "page_number": 1,
             "original_section_title": "Page 1",
-            "text_length": 716
+            "text_length": 582
+        },
+        {
+            "document": "South of France - Things to Do.pdf",
+            "refined_text": "This guide will take you through a variety of activities and must-see attractions to help you plan an unforgettable trip. • Dordogne River: Enjoy a leisurely canoe trip, passing by medieval castles and charming villages. • Bordeaux: Take a day trip to the world-renowned wine region and visit its prestigious châteaux. • Fréjus: Cool oﬀ at Aqualand water park. Conclusion The South of France is a diverse and enchanting region that oﬀers a wide range of activities and experiences for travelers. Use this guide to plan your trip and make the most of everything this beautiful region has to oﬀer.",
+            "page_number": 1,
+            "original_section_title": "Page 1",
+            "text_length": 595
+        },
+        {
+            "document": "South of France - Restaurants and Hotels.pdf",
+            "refined_text": "Whether you're looking for budget-friendly options, family-friendly spots, upscale dining, or luxurious experiences, this guide will help you find the perfect restaurants and hotels for your trip. The modern amenities and convenient location make it a great choice for budget-conscious travelers. The modern amenities and convenient location make it a great choice for budget-conscious travelers. The modern amenities and convenient location make it a great choice for budget-conscious travelers. The friendly staﬀ and aﬀordable rates make it a good option for travelers on a budget.",
+            "page_number": 1,
+            "original_section_title": "Page 1",
+            "text_length": 583
         },
         {
             "document": "South of France - Cities.pdf",
-            "refined_text": "Comprehensive Guide to Major Cities in the South of France Introduction The South of France, known for its stunning landscapes, Mediterranean coastline, and rich cultural heritage, is home to some of the most beautiful and historically significant cities in the country. Overview of the Region The South of France, or \"Le Midi,\" encompasses the regions of Provence-Alpes-Côte d'Azur, Occitanie, and parts of Nouvelle-Aquitaine. Travel Tips • Best Time to Visit: The best time to visit the South of France is during the spring (April to June) and fall (September to October) when the weather is pleasant, and the tourist crowds are smaller.",
+            "refined_text": "Whether you're planning a visit or simply want to learn more about this enchanting region, this guide will oﬀer valuable insights into each city's charm and allure. Travel Tips • Best Time to Visit: The best time to visit the South of France is during the spring (April to June) and fall (September to October) when the weather is pleasant, and the tourist crowds are smaller. • Transportation: The region is well-connected by an extensive network of trains, buses, and flights. Learning a few basic French phrases can enhance your travel experience.",
             "page_number": 1,
             "original_section_title": "Page 1",
-            "text_length": 639
+            "text_length": 550
         },
         {
             "document": "South of France - History.pdf",
-            "refined_text": "A Historical Journey Through the South of France Introduction The South of France, renowned for its picturesque landscapes, charming villages, and stunning coastline, is also steeped in history. This guide will take you through the histories of major cities, famous historical sites, and other points of interest to help you plan an enriching and unforgettable trip.",
-            "page_number": 1,
-            "original_section_title": "Page 1",
-            "text_length": 366
-        },
-        {
-            "document": "South of France - Tips and Tricks.pdf",
-            "refined_text": "The Ultimate South of France Travel Companion: Your Comprehensive Guide to Packing, Planning, and Exploring Introduction Planning a trip to the South of France requires thoughtful preparation to ensure a comfortable and enjoyable experience. Whether you're traveling solo, with kids, or in a group, this guide will help you make the most of your trip. • Copies of Important Documents: Make copies of your passport, travel insurance, and other important documents. • Portable Laundry Kit: A small laundry kit with detergent and a travel clothesline can be handy for longer trips. Conclusion Packing for a trip to the South of France involves considering the season, planned activities, and the needs of both adults and children.",
-            "page_number": 1,
-            "original_section_title": "Page 1",
-            "text_length": 727
-        },
-        {
-            "document": "South of France - Cuisine.pdf",
-            "refined_text": "Famous Dishes The South of France is home to many iconic dishes that you must try during your visit: • Bouillabaisse: A traditional fish stew from Marseille, made with various types of fish, shellfish, and a flavorful broth seasoned with saﬀron and herbs. Must-Visit Restaurants To truly experience the culinary delights of the South of France, here are some restaurants you should consider visiting: • Le Petit Nice Passedat (Marseille): A three-Michelin-starred restaurant oﬀering exquisite seafood dishes and stunning views of the Mediterranean. Use this guide to plan your culinary journey and savor the tastes of the South of France, creating memories that will linger long after your trip has ended.",
-            "page_number": 1,
-            "original_section_title": "Page 1",
-            "text_length": 705
+            "refined_text": "Key Historical Sites in Aix-en-Provence • Cours Mirabeau: This grand boulevard, lined with plane trees, cafes, and fountains, is the heart of Aix-en-Provence. It is known for its beautiful cloister and triptych by Nicolas Froment. • Hôtel de Ville: The town hall of Aix-en-Provence, built in the 17th century, is an elegant building with a beautiful clock tower and an ornate facade. The square in front of the Hôtel de Ville is a lively spot, often hosting markets and events. Visitors can see where Cézanne created many of his masterpieces and gain insight into his artistic process.",
+            "page_number": 8,
+            "original_section_title": "Arles: A Roman Treasure Arles, located on the banks of the Rhône River, is renowned for its Roman and Romanesque monuments. The city was an important Roman settlement and later became a center of Christian pilgrimage. Key Historical Sites in Arles • Arles Amphitheatre: This Roman amphitheater, built in the 1st century AD, is still used for events such as bullfights and concerts. It is one of the best-preserved Roman structures in France. • Church of St. Trophime: This Romanesque church, built in the 12th century, is known for its stunning portal and cloister. It was an important stop on the pilgrimage route to Santiago de Compostela. • Alyscamps: This ancient Roman necropolis, located just outside the city walls, was a major burial site in antiquity. It features a long avenue lined with sarcophagi. • Thermes de Constantin: These Roman baths, built in the 4th century AD, are a testament to the city's importance during the Roman period. • Van Gogh's Influence: Arles is also famous for its association with Vincent van Gogh, who created over 300 works of art during his time in the city. The Van Gogh Foundation in Arles celebrates his legacy. • Cryptoporticus: An underground gallery built by the Romans in the 1st century BC, it served as a foundation for the Forum and is one of the few remaining examples of such structures.",
+            "text_length": 585
         }
     ]
 }

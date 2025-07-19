@@ -11,31 +11,32 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class RelevanceRanker:
-    """Ranks document sections by relevance to persona and job."""
+    """Enhanced relevance ranker using optimized models for document sections."""
     
-    def __init__(self, model_manager: ModelManager = None, use_large_model: bool = False):
+    def __init__(self, model_manager: ModelManager = None, task_type: str = "domain"):
         """
-        Initialize the relevance ranker.
+        Initialize the enhanced relevance ranker.
         
         Args:
             model_manager: ModelManager instance for handling models
-            use_large_model: Whether to use a larger, more accurate model
+            task_type: Type of task for model selection ('domain', 'qa', 'general', 'fast')
         """
         self.model_manager = model_manager or ModelManager()
         
-        # Select model based on preference
-        self.model_key = "sentence_transformer_large" if use_large_model else "sentence_transformer"
+        # Select optimal model based on task type
+        self.model_key = self.model_manager.get_best_model_for_task(task_type)
         
         # Load the model
         try:
             self.model = self.model_manager.load_sentence_transformer(self.model_key)
-            logger.info(f"Successfully loaded model: {self.model_key}")
+            logger.info(f"Successfully loaded optimized model: {self.model_key}")
         except Exception as e:
             logger.error(f"Failed to load model {self.model_key}: {e}")
-            # Fallback to basic model
+            # Fallback to fast model
             try:
-                self.model = self.model_manager.load_sentence_transformer("sentence_transformer")
-                logger.info("Fallback to basic sentence transformer model")
+                self.model_key = "sentence_transformer_fast"
+                self.model = self.model_manager.load_sentence_transformer(self.model_key)
+                logger.info("Fallback to fast sentence transformer model")
             except Exception as e2:
                 raise RuntimeError(f"Could not load any sentence transformer model: {e2}")
         

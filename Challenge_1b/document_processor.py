@@ -87,10 +87,12 @@ class DocumentProcessor:
         """
         doc_name = Path(pdf_path).name
         doc = None
+        page_count = 0
         
         try:
             doc = fitz.open(pdf_path)
-            logger.info(f"Opened document {doc_name} with {doc.page_count} pages")
+            page_count = doc.page_count
+            logger.info(f"Opened document {doc_name} with {page_count} pages")
         except Exception as e:
             logger.error(f"Cannot open PDF {doc_name}: {e}")
             return None
@@ -100,7 +102,7 @@ class DocumentProcessor:
         total_text_length = 0
         
         try:
-            for page_num in range(doc.page_count):
+            for page_num in range(page_count):
                 try:
                     page = doc[page_num]
                     
@@ -158,7 +160,7 @@ class DocumentProcessor:
             if not sections and total_text_length > 0:
                 # Extract all text as one section
                 all_text = ""
-                for page_num in range(doc.page_count):
+                for page_num in range(page_count):
                     try:
                         page = doc[page_num]
                         text = page.get_text()
@@ -191,7 +193,7 @@ class DocumentProcessor:
         return {
             "filename": doc_name,
             "path": pdf_path,
-            "pages": doc.page_count if doc else 0,
+            "pages": page_count,
             "sections": sections,
             "total_text_length": total_text_length
         }

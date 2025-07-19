@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import re
 import nltk
 from nltk.tokenize import sent_tokenize
 import logging
+import numpy as np
 from model_manager import ModelManager
 
 # Set up logging  
@@ -11,19 +12,23 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class SubsectionAnalyzer:
-    """Analyzes and refines subsections from extracted document sections."""
+    """Enhanced subsection analyzer with semantic analysis capabilities."""
     
     def __init__(self, model_manager: ModelManager = None):
         """
-        Initialize the subsection analyzer.
+        Initialize the enhanced subsection analyzer.
         
         Args:
-            model_manager: ModelManager instance for handling NLTK data
+            model_manager: ModelManager instance for handling models and NLTK data
         """
         self.model_manager = model_manager or ModelManager()
         
         # Download NLTK data if needed
         self.model_manager.download_nltk_data()
+        
+        # Initialize semantic model for enhanced analysis
+        self.semantic_model = None
+        self._initialize_semantic_model()
         
         # Verify NLTK data is available
         try:
@@ -32,11 +37,22 @@ class SubsectionAnalyzer:
         except LookupError:
             logger.warning("NLTK punkt tokenizer not found, using basic sentence splitting")
     
+    def _initialize_semantic_model(self):
+        """Initialize the semantic model for enhanced analysis."""
+        try:
+            # Use the best model for general semantic analysis
+            best_model_key = self.model_manager.get_best_model_for_task("general")
+            self.semantic_model = self.model_manager.load_sentence_transformer(best_model_key)
+            logger.info(f"Initialized semantic model: {best_model_key}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize semantic model: {e}")
+            self.semantic_model = None
+    
     def analyze_subsections(self, documents: List[Dict[str, Any]], 
                            ranked_sections: List[Dict[str, Any]],
                            persona: str, job: str, top_n: int = 5) -> List[Dict[str, Any]]:
         """
-        Analyze and refine subsections from ranked sections.
+        Enhanced analyze and refine subsections from ranked sections with semantic analysis.
         
         Args:
             documents: List of processed document dictionaries
@@ -46,13 +62,16 @@ class SubsectionAnalyzer:
             top_n: Number of top subsections to return
             
         Returns:
-            List of subsection analysis dictionaries
+            List of enhanced subsection analysis dictionaries
         """
         if not documents or not ranked_sections:
             logger.warning("No documents or ranked sections provided")
             return []
             
         subsection_analyses = []
+        
+        # Create semantic context for persona and job
+        semantic_context = f"{persona} {job}"
         
         # Map document filenames to document objects
         doc_map = {doc["filename"]: doc for doc in documents}
@@ -82,12 +101,12 @@ class SubsectionAnalyzer:
                     logger.warning(f"Section content not found for {section_title} on page {page_number}")
                     continue
                 
-                # Refine the section content with multiple strategies
-                refined_text = self._refine_text_advanced(section_content, persona, job)
+                # Refine the section content with enhanced semantic strategies
+                refined_text = self._refine_text_semantic(section_content, persona, job)
                 
-                # Fallback if advanced refinement fails
+                # Fallback if semantic refinement fails
                 if not self._is_valid_text(refined_text):
-                    refined_text = self._refine_text(section_content, persona, job)
+                    refined_text = self._refine_text_advanced(section_content, persona, job)
                 
                 # Second fallback for difficult cases
                 if not self._is_valid_text(refined_text):
@@ -411,6 +430,145 @@ class SubsectionAnalyzer:
             refined_text = text[:800]
         
         return refined_text.strip()
+    
+    def _refine_text_semantic(self, text: str, persona: str, job: str) -> str:
+        """
+        Enhanced text refinement using semantic analysis.
+        
+        Args:
+            text: Section content
+            persona: Description of the user persona
+            job: Job to be done by the persona
+            
+        Returns:
+            Semantically refined text
+        """
+        if not self.semantic_model or len(text) < 100:
+            # Fallback to advanced method if semantic model unavailable
+            return self._refine_text_advanced(text, persona, job)
+        
+        try:
+            # Clean up the text first
+            text = re.sub(r'\s+', ' ', text).strip()
+            
+            # Tokenize into sentences
+            sentences = self._safe_sentence_tokenize(text)
+            if not sentences:
+                return text[:600]
+            
+            # Create semantic context
+            semantic_context = f"{persona} needs to {job}"
+            
+            # Calculate semantic relevance for each sentence
+            sentence_scores = []
+            for sentence in sentences:
+                if len(sentence.strip()) < 20:  # Skip very short sentences
+                    continue
+                    
+                # Calculate semantic similarity
+                semantic_score = self._calculate_semantic_relevance(sentence, semantic_context)
+                
+                # Calculate keyword relevance (legacy scoring)
+                keyword_score = self._calculate_keyword_relevance(sentence, persona, job)
+                
+                # Combine scores (70% semantic, 30% keyword)
+                combined_score = 0.7 * semantic_score + 0.3 * keyword_score
+                
+                sentence_scores.append({
+                    'sentence': sentence,
+                    'score': combined_score,
+                    'semantic_score': semantic_score,
+                    'keyword_score': keyword_score
+                })
+            
+            # Sort by combined score
+            sentence_scores.sort(key=lambda x: x['score'], reverse=True)
+            
+            # Select top sentences within length limit
+            selected_sentences = []
+            total_length = 0
+            target_length = 600
+            
+            for item in sentence_scores:
+                sentence = item['sentence']
+                if total_length + len(sentence) <= target_length:
+                    selected_sentences.append(sentence)
+                    total_length += len(sentence)
+                elif total_length < 300:  # Ensure minimum content
+                    selected_sentences.append(sentence[:target_length - total_length])
+                    break
+            
+            if selected_sentences:
+                # Reorder sentences to maintain original flow
+                selected_sentences.sort(key=lambda s: sentences.index(s) if s in sentences else len(sentences))
+                return " ".join(selected_sentences).strip()
+            else:
+                return text[:600]
+                
+        except Exception as e:
+            logger.warning(f"Semantic refinement failed: {e}, falling back to advanced method")
+            return self._refine_text_advanced(text, persona, job)
+    
+    def _calculate_semantic_relevance(self, sentence: str, context: str) -> float:
+        """
+        Calculate semantic relevance between sentence and context.
+        
+        Args:
+            sentence: Sentence to score
+            context: Context to compare against
+            
+        Returns:
+            Semantic relevance score (0-1)
+        """
+        try:
+            if not self.semantic_model:
+                return 0.0
+            
+            # Get embeddings
+            sentence_embedding = self.semantic_model.encode([sentence])
+            context_embedding = self.semantic_model.encode([context])
+            
+            # Calculate cosine similarity
+            similarity = np.dot(sentence_embedding[0], context_embedding[0]) / (
+                np.linalg.norm(sentence_embedding[0]) * np.linalg.norm(context_embedding[0])
+            )
+            
+            # Normalize to 0-1 range
+            return max(0.0, min(1.0, (similarity + 1) / 2))
+            
+        except Exception as e:
+            logger.warning(f"Semantic similarity calculation failed: {e}")
+            return 0.0
+    
+    def _calculate_keyword_relevance(self, sentence: str, persona: str, job: str) -> float:
+        """
+        Calculate keyword-based relevance score.
+        
+        Args:
+            sentence: Sentence to score
+            persona: User persona
+            job: Job description
+            
+        Returns:
+            Keyword relevance score (0-1)
+        """
+        sentence_lower = sentence.lower()
+        
+        # Extract keywords
+        persona_keywords = set(word.lower() for word in persona.split() if len(word) > 2)
+        job_keywords = set(word.lower() for word in job.split() if len(word) > 2)
+        
+        # Count matches
+        persona_matches = sum(1 for kw in persona_keywords if kw in sentence_lower)
+        job_matches = sum(1 for kw in job_keywords if kw in sentence_lower)
+        
+        # Calculate score
+        total_keywords = len(persona_keywords) + len(job_keywords)
+        if total_keywords == 0:
+            return 0.0
+        
+        total_matches = persona_matches + job_matches
+        return min(1.0, total_matches / max(1, total_keywords * 0.3))  # Normalize
     
     def _safe_sentence_tokenize(self, text: str) -> List[str]:
         """
