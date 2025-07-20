@@ -1,0 +1,22 @@
+add the model for the util for classify if you feel the need. 
+
+also add the spacy model 
+
+The spaCy model that was chosen and integrated for multilingual support is:
+
+                                                                                                                                     xx_ent_wiki_sm
+
+Here's a recap of why and its characteristics:
+
+                                                                                                                                Name: xx_ent_wiki_sm
+
+Purpose: It's a multi-language pipeline optimized for CPU. Its primary component is Named Entity Recognition (NER), but it's also useful for basic language detection (via doc.lang_) and robust tokenization across various languages, including those without explicit word delimiters (like Japanese).
+
+Size: It's a "small" (sm) model, typically around 10 MB. This size is well within your 200MB model constraint.
+
+Compatibility: It's compatible with spaCy version 3.x (specifically, spaCy 3.7.2 in your requirements.txt).
+
+Offline Use: It can be installed offline by downloading its .whl (wheel) file and installing it locally within your Docker build process, avoiding network calls during runtime.
+
+This model was specifically chosen to balance the need for multilingual awareness (to gain bonus points) with the strict constraints on model size and offline operation.
+
