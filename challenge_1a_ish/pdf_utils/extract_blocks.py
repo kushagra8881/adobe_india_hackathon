@@ -109,7 +109,7 @@ def run(pdf_path, output_path):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     try:
         with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(all_blocks, f, indent=2)
+            json.dump(all_blocks, f, indent=2, ensure_ascii=False)
     except IOError as e:
         raise RuntimeError(f"Error writing intermediate blocks to {output_path}: {e}")
     

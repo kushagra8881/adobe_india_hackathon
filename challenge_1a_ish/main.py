@@ -7,8 +7,9 @@ if script_dir not in sys.path:
 
 from pdf_utils import extract_blocks, classify_headings, structure_outline, generate_outline
 
-INPUT_DIR = "/app/input"
-OUTPUT_DIR = "/app/output"
+# Use local directories instead of container paths
+INPUT_DIR = os.path.join(script_dir, "input")
+OUTPUT_DIR = os.path.join(script_dir, "output")
 
 def process_pdf(pdf_path, output_dir):
     """
