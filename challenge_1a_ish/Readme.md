@@ -1,4 +1,4 @@
----
+
 ✅ Python 3.10 Compatibility
 This project is verified to run smoothly on Python 3.10 with the following library versions:
 
@@ -13,7 +13,6 @@ pandas==2.2.2: Requires Python ≥3.9 — compatible with 3.10.
 joblib==1.4.0: Requires Python ≥3.9 — compatible with 3.10.
 
 ✅ All dependencies are fully compatible with Python 3.10, ensuring stable performance. 
----
 
 # PDF Outline Extraction Pipeline
 
