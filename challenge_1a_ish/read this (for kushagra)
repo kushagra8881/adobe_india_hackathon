@@ -1,0 +1,5 @@
+go though the readme once before decision. it contains the code file needs and the answers for whys??!
+
+i have used spacy for multilingual support 
+
+i have used a weight-based heuristic approach with dynamic decisions(for file to file adaptability) for decison making insted of a ML based approach since there is no specific dataset and it would be foolish to base the entire challenge on a synthetic based data. 
