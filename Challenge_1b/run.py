@@ -20,27 +20,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Check required packages
-required_packages = [
-    "pymupdf", "sentence_transformers", "nltk", "torch", "huggingface_hub", "numpy"
-]
-
-missing_packages = []
-for package in required_packages:
-    try:
-        __import__(package.replace("-", "_"))
-    except ImportError:
-        missing_packages.append(package)
-
-if missing_packages:
-    print("❌ Error: Missing required Python packages. Please install them using:")
-    print(f"pip install {' '.join(missing_packages)}")
-    print("\n📦 You may also need to install system packages:")
-    print("- For Ubuntu/Debian: sudo apt-get install tesseract-ocr libtesseract-dev poppler-utils")
-    print("- For macOS: brew install tesseract poppler")
-    print("- For Windows: Install poppler and tesseract manually")
-    sys.exit(1)
-
 # Import project modules
 try:
     from model_manager import ModelManager
@@ -74,8 +53,6 @@ Examples:
                         help="Number of top sections to extract")
     parser.add_argument("--top-subsections", type=int, default=5,
                         help="Number of top subsections to analyze")
-    parser.add_argument("--models-dir", type=str, default="./models",
-                        help="Directory to store downloaded models")
     parser.add_argument("--use-ocr", action="store_true", default=True,
                         help="Use OCR for image-based text extraction")
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -124,7 +101,7 @@ def main():
     # Initialize components
     try:
         logger.info("🔧 Initializing processing components...")
-        model_manager = ModelManager(args.models_dir)
+        model_manager = ModelManager()
         document_processor = DocumentProcessor(use_ocr=args.use_ocr)
         relevance_ranker = RelevanceRanker(model_manager)
         subsection_analyzer = SubsectionAnalyzer(model_manager)
