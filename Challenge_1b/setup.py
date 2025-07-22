@@ -1,3 +1,5 @@
+import sys
+
 # Check required packages
 required_packages = [
     "pymupdf", "sentence_transformers", "nltk", "torch", "huggingface_hub", "numpy"
@@ -29,4 +31,4 @@ except ImportError as e:
 
 if __name__ == "__main__":
     model_manager = ModelManager()
-    model_manager.setup_enhanced_models
+    model_manager.setup_enhanced_models()

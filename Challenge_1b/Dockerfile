@@ -1,5 +1,5 @@
 # switch to python:3.10 or python:3.10-slim is build breaks
-FROM --platform=linux/amd64 python:3.10-slim-buster
+FROM python:3.10-slim-bullseye
 
 WORKDIR /app
 
@@ -22,12 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY requirements.txt ./
 
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-# installed seprately for unique args(cpu-only)
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+    pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt
 
 COPY *.py /app/
 
@@ -35,5 +33,3 @@ RUN mkdir -p models/.cache && \
     chmod 755 models
 
 RUN python setup.py
-
-CMD ["python", "run.py"]
