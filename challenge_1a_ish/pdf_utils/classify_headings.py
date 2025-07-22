@@ -1,195 +1,488 @@
-# pdf_utils/classify_headings.py
-
 import json
 import statistics
 import re
-import os
-import spacy
 import collections
 from operator import itemgetter
+import numpy as np
+import math
 
-# No ML model reliance for maximum heuristic precision under given constraints.
-# HEADING_CLASSIFIER_MODEL_PATH = "models/heading_classifier.pkl"
-# heading_classifier_model = None
-
-SPACY_MODEL_NAME = "xx_ent_wiki_sm" # Stick to this one for size/offline constraints
-nlp = None
-try:
-    # Use disable=['parser', 'ner', 'textcat'] for faster loading and smaller memory footprint
-    nlp = spacy.load(SPACY_MODEL_NAME, disable=['parser', 'ner', 'textcat'])
-    print(f"Loaded spaCy model: {SPACY_MODEL_NAME} for multilingual analysis.")
-except OSError:
-    print(f"SpaCy model '{SPACY_MODEL_NAME}' not found. Multilingual features will be limited. Please ensure it's downloaded manually for offline use.")
-except Exception as e:
-    print(f"Error loading spaCy model: {e}. Multilingual features will be limited.")
-
-
-def build_logical_blocks(raw_blocks):
+def _has_unclosed_parentheses_brackets(text):
     """
-    Groups raw extracted lines into logical blocks (paragraphs, multi-line list items)
-    based on vertical and horizontal proximity, and flow indicators.
-    This function processes blocks from PyMuPDF, which are already somewhat grouped.
-    The goal here is to further merge lines that clearly belong to the same logical unit.
+    Checks if a string has unclosed parentheses, brackets, or braces.
+    Returns True if unclosed, False otherwise.
     """
-    if not raw_blocks:
+    stack = []
+    mapping = {")": "(", "]": "[", "}": "{"}
+    for char in text:
+        if char in mapping.values():
+            stack.append(char)
+        elif char in mapping:
+            if not stack or stack.pop() != mapping[char]:
+                return True # Mismatched or unclosed
+    return len(stack) > 0 # Any left in stack means unclosed
+
+def _get_heading_regex_matches(text):
+    """
+    Returns a list of potential heading levels a text matches based on regex patterns,
+    along with a confidence score for that regex match.
+    Gives very high precision for common patterns.
+    """
+    matches = []
+    cleaned_text = text.strip()
+
+    # --- H1 Patterns (Highest Confidence) ---
+    # CHAPTER/SECTION/ARTICLE followed by number/Roman/letter
+    # Added optional text after the number/letter for titles
+    if re.match(r'^\s*(CHAPTER|SECTION|ARTICLE)\s+([\dIVXLCDM]+\.?|\w\.?)(?:\s+[\S].*)?$', cleaned_text, re.IGNORECASE):
+        matches.append({"level": "H1", "confidence": 0.98})
+    # Single level numeric headings (e.g., "1. Introduction", "2. Methodology")
+    # Must start with capital letter if text follows.
+    elif re.match(r'^\s*(\d+)\.?[. ]+\s*[A-Z].*$', cleaned_text):
+        matches.append({"level": "H1", "confidence": 0.95})
+    # Long all-caps text (e.g., "TERMS AND CONDITIONS")
+    elif re.match(r'^\s*[A-Z][A-Z\s]{10,}[A-Z\d]?\s*$', cleaned_text) and len(cleaned_text.split()) > 2: # Min 3 words for all-caps H1
+        matches.append({"level": "H1", "confidence": 0.90})
+
+    # --- H2 Patterns ---
+    # Two-level numeric (e.g., "1.1 Subtitle")
+    if re.match(r'^\s*(\d+\.\d+)\.?[. ]+\s*[A-Z].*$', cleaned_text):
+        matches.append({"level": "H2", "confidence": 0.88})
+    # Roman numeral headings (e.g., "I. Introduction")
+    elif re.match(r'^\s*(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII|XVIII|XIX|XX)\.?[. ]+\s*[A-Z].*$', cleaned_text):
+        matches.append({"level": "H2", "confidence": 0.85})
+    # Single capital letter followed by text (e.g., "A. Overview")
+    elif re.match(r'^\s*([A-Z])\.?[. ]+\s*[A-Z].*$', cleaned_text):
+        matches.append({"level": "H2", "confidence": 0.82})
+
+    # --- H3 Patterns ---
+    # Three-level numeric (e.g., "1.1.1 Detail")
+    if re.match(r'^\s*(\d+\.\d+\.\d+)\.?[. ]+\s*[A-Z].*$', cleaned_text):
+        matches.append({"level": "H3", "confidence": 0.78})
+    # Lowercase letter in parentheses (e.g., "(a) Sub-point")
+    elif re.match(r'^\s*\([a-z]\)\s+[A-Z].*$', cleaned_text):
+        matches.append({"level": "H3", "confidence": 0.75})
+    # Simple dash/bullet point with capital letter (if very common heading style)
+    elif re.match(r'^\s*[-•]\s+[A-Z].*$', cleaned_text):
+        matches.append({"level": "H3", "confidence": 0.70})
+
+    # --- H4 Patterns ---
+    # Four or more level numeric (e.g., "1.1.1.1 Item")
+    if re.match(r'^\s*(\d+\.\d+\.\d+\.\d+)\.?[. ]+\s*\S.*$', cleaned_text):
+        matches.append({"level": "H4", "confidence": 0.68})
+    # Any other letter/number in parentheses (e.g., "(1) Item")
+    elif re.match(r'^\s*\((\d+|[A-Z])\)\s+\S.*$', cleaned_text):
+        matches.append({"level": "H4", "confidence": 0.65})
+        
+    return sorted(matches, key=itemgetter("confidence"), reverse=True)
+
+
+def analyze_line_changes_and_merge(blocks_with_precalculated_features):
+    """
+    Iterates through blocks (which should already have basic features like x0_normalized,
+    font_size_ratio_to_common), infers line change reasons dynamically, and performs merging
+    based on those reasons and the specific new logic.
+    Marks blocks with `_exclude_from_outline_classification = True` if they represent
+    a "complete word body" that is > 15 words.
+    """
+    if not blocks_with_precalculated_features:
         return []
 
-    # Ensure blocks are sorted by page, then top, then x0 at the very start
-    raw_blocks.sort(key=itemgetter("page", "top", "x0"))
-
-    logical_blocks = []
+    # --- Step 0: Pre-merge very tightly spaced horizontal fragments (e.g., "RFP: R RFP: Re" blunder fix) ---
+    pre_merged_blocks = []
     i = 0
-    while i < len(raw_blocks):
-        current_block = raw_blocks[i]
+    while i < len(blocks_with_precalculated_features):
+        current_block = blocks_with_precalculated_features[i]
+        temp_merged_block = current_block.copy()
         
-        # Initialize logical_block with a copy of the current block
-        # Make a deep copy if block contents include mutable types that you want to preserve separately
-        # For dictionaries with basic types, shallow copy is fine initially.
-        logical_block = current_block.copy()
-        
+        # Ensure x1 is present when copying for the first time
+        temp_merged_block.setdefault("x1", temp_merged_block["x0"] + temp_merged_block["width"])
+
+
         j = i + 1
-        while j < len(raw_blocks):
-            next_block = raw_blocks[j]
+        while j < len(blocks_with_precalculated_features):
+            next_block = blocks_with_precalculated_features[j]
+            
+            # Ensure next_block has x1 for comparison, though PyMuPDF should provide it
+            next_block.setdefault("x1", next_block["x0"] + next_block["width"])
 
-            # Conditions for merging
-            # 1. Same page
-            if next_block["page"] != logical_block["page"]:
+            if next_block["page"] != temp_merged_block["page"]:
                 break
-
-            # 2. Vertical Proximity: Is the gap between current and next small?
-            vertical_gap = next_block["top"] - logical_block["bottom"]
-            # Use line_height of the current block for relative comparison
-            avg_line_height = logical_block.get("line_height", logical_block.get("height", 12))
-            is_close_vertically = 0 <= vertical_gap < avg_line_height * 0.8 # Allow for slight overlap or small gap
-
-            # 3. Horizontal Alignment: Do they align sufficiently?
-            # Consider both starting point alignment and whether they fall within a similar column
-            is_aligned_horizontally = abs(next_block["x0"] - logical_block["x0"]) < 15 # Tolerance for slight indents within a paragraph
-            is_within_current_block_x_range = next_block["x0"] >= logical_block["x0"] - 5 and \
-                                              next_block["x0"] < logical_block["x0"] + logical_block["width"] + 10
-
-
-            # 4. Font Similarity: Are font sizes and names similar?
-            is_similar_font_size = abs(next_block["font_size"] - logical_block["font_size"]) < 0.5
-            is_similar_font_name = next_block["font_name"] == logical_block["font_name"] or \
-                                   (next_block["font_name"] and logical_block["font_name"] and \
-                                    next_block["font_name"].split('+')[-1] == logical_block["font_name"].split('+')[-1])
-
-            # 5. Text Flow Indicators: Heuristics to decide if they are part of the same sentence/paragraph
-            current_ends_sentence = re.search(r'[.?!]$', logical_block["text"].strip())
-            current_ends_hyphen = logical_block["text"].strip().endswith('-')
-            is_connecting_punctuation_at_end = re.search(r'[,;:]$', logical_block["text"].strip())
-            next_starts_lowercase = next_block["text"].strip() and next_block["text"].strip()[0].islower()
-            is_very_short_next = len(next_block["text"].split()) < 5
-
-            # Do not merge if the next block looks like a new, distinct element (e.g., a sub-heading, bullet point, or new paragraph)
-            next_starts_heading_cue = (
-                next_block.get("is_bold", False) and next_block["font_size"] > logical_block["font_size"] * 1.15 # Significantly larger font for new heading
-            ) or re.match(r"^\s*(\d+(\.\d+)*\s*[.)\]]?\s*|[A-Za-z]\s*[.)\]]?\s*|[IVXLCDM]+\s*[.)\]]?\s*|[O●■*◆→])", next_block["text"].strip())
             
-            # Prevent merging across clear paragraph breaks
-            is_large_gap_to_next = vertical_gap > avg_line_height * 1.5 # A more significant vertical gap
-            next_starts_uppercase_and_new_sentence = next_block["text"].strip() and \
-                                                     next_block["text"].strip()[0].isupper() and \
-                                                     not current_ends_hyphen and \
-                                                     current_ends_sentence
-
-
-            should_merge = False
-            if is_close_vertically and (is_aligned_horizontally or is_within_current_block_x_range) and is_similar_font_size and is_similar_font_name:
-                if current_ends_hyphen or is_connecting_punctuation_at_end or \
-                   (next_starts_lowercase and not current_ends_sentence) or \
-                   is_very_short_next or \
-                   (not current_ends_sentence and not next_starts_heading_cue and not is_large_gap_to_next):
-                    should_merge = True
-                # Special case for titles/labels that span multiple lines, often bold and then regular
-                elif re.match(r"^\s*[A-Z][A-Z\s]*:\s*$", logical_block["text"].strip()) and next_block["x0"] >= logical_block["x0"]:
-                    should_merge = True
+            # Condition for merging very tight horizontal fragments
+            horizontal_gap = next_block["x0"] - temp_merged_block["x1"]
+            vertical_overlap = min(temp_merged_block["bottom"], next_block["bottom"]) - max(temp_merged_block["top"], next_block["top"])
             
-            # Final checks to prevent over-merging
-            if next_starts_uppercase_and_new_sentence and is_large_gap_to_next and not current_ends_hyphen:
-                should_merge = False
+            if horizontal_gap < 5 and horizontal_gap > -5 and \
+               vertical_overlap > min(temp_merged_block["height"], next_block["height"]) * 0.8 and \
+               abs(next_block["font_size"] - temp_merged_block["font_size"]) < 0.2 and \
+               next_block["font_name"].split('+')[-1] == temp_merged_block["font_name"].split('+')[-1]:
+                
+                temp_merged_block["text"] += next_block["text"]
+                # Crucially, update x1 here!
+                temp_merged_block["x1"] = next_block["x1"] 
+                temp_merged_block["width"] = temp_merged_block["x1"] - temp_merged_block["x0"]
+                temp_merged_block["bottom"] = max(temp_merged_block["bottom"], next_block["bottom"])
+                temp_merged_block["height"] = temp_merged_block["bottom"] - temp_merged_block["top"]
+                temp_merged_block["is_bold"] = temp_merged_block.get("is_bold", False) or next_block.get("is_bold", False)
+                temp_merged_block["is_italic"] = temp_merged_block.get("is_italic", False) or next_block.get("is_italic", False)
+                j += 1
+            else:
+                break
+        
+        pre_merged_blocks.append(temp_merged_block)
+        i = j
+
+    # Use pre_merged_blocks for subsequent analysis
+    blocks_to_analyze = pre_merged_blocks
+
+
+    # --- Step 1: Collect Vertical Gaps and Line Heights for Dynamic Analysis ---
+    significant_vertical_gaps = []
+    line_height_candidates = [] 
+    
+    all_font_sizes = [b["font_size"] for b in blocks_to_analyze if b.get("font_size") and b["font_size"] > 0]
+    if not all_font_sizes:
+        most_common_font_size = 12.0
+    else:
+        try:
+            most_common_font_size = statistics.median(all_font_sizes)
+        except statistics.StatisticsError:
+            most_common_font_size = all_font_sizes[0]
             
-            # Avoid merging if the combined text becomes excessively long for a single logical block
-            if should_merge and (len(logical_block["text"]) + len(next_block["text"])) > 500: # Arbitrary limit for a block
-                should_merge = False
+    mean_line_height = most_common_font_size * 1.2 # A common heuristic for line height from font size
 
+    for i, block in enumerate(blocks_to_analyze):
+        line_height_candidates.append(block.get("line_height", block.get("height", mean_line_height)))
+        if i > 0 and blocks_to_analyze[i-1]["page"] == block["page"]:
+            prev_block = blocks_to_analyze[i-1]
+            vertical_gap = block["top"] - prev_block["bottom"]
+            x_diff = block["x0"] - prev_block["x0"]
 
-            if should_merge:
-                merged_text = logical_block["text"]
+            is_aligned_horizontally = abs(x_diff) < 15 
+            is_similar_font_size = abs(block["font_size"] - prev_block["font_size"]) < 0.5
+            font_name_prev_base = prev_block["font_name"].split('+')[-1] if prev_block["font_name"] else ""
+            font_name_curr_base = block["font_name"].split('+')[-1] if block["font_name"] else ""
+            is_similar_font_name = font_name_prev_base == font_name_curr_base
+
+            if vertical_gap > -5 and vertical_gap < 50 and is_aligned_horizontally and is_similar_font_size and is_similar_font_name:
+                significant_vertical_gaps.append(vertical_gap)
+
+    # --- Step 2: Calculate Dynamic Gap Thresholds ---
+    if not line_height_candidates:
+        calculated_mean_line_height = 12.0
+    else:
+        calculated_mean_line_height = np.mean([lh for lh in line_height_candidates if lh > 0])
+
+    if len(significant_vertical_gaps) < 10: 
+        typical_line_spacing_threshold = calculated_mean_line_height * 0.6
+        paragraph_break_threshold = calculated_mean_line_height * 1.5
+    else:
+        gaps_sorted = np.sort(significant_vertical_gaps)
+        tight_gap_upper_bound = np.percentile(gaps_sorted, 40) 
+        paragraph_gap_lower_bound = np.percentile(gaps_sorted, 75) 
+        
+        typical_line_spacing_threshold = max(0.5, min(tight_gap_upper_bound, calculated_mean_line_height * 0.7))
+        paragraph_break_threshold = max(calculated_mean_line_height * 1.0, paragraph_gap_lower_bound * 1.2)
+        
+        if paragraph_break_threshold <= typical_line_spacing_threshold + calculated_mean_line_height * 0.3:
+            paragraph_break_threshold = typical_line_spacing_threshold + calculated_mean_line_height * 0.5
+
+    # --- Step 3: First Pass: Tag blocks with line change reasons using dynamic thresholds ---
+    blocks_tagged_with_line_features = []
+    for i, block in enumerate(blocks_to_analyze):
+        block_features = block.copy() 
+        
+        block_features["is_line_wrapped"] = False 
+        block_features["is_intentional_newline"] = False 
+        block_features["is_paragraph_start"] = False 
+
+        prev_block = blocks_to_analyze[i-1] if i > 0 and blocks_to_analyze[i-1]["page"] == block["page"] else None
+
+        if prev_block:
+            vertical_gap = block["top"] - prev_block["bottom"]
+            x_diff = block["x0"] - prev_block["x0"]
+            
+            if vertical_gap <= typical_line_spacing_threshold and abs(x_diff) < 5 and \
+               not re.search(r'[.?!]$', prev_block["text"].strip()):
+                block_features["is_line_wrapped"] = True
+            
+            elif vertical_gap >= paragraph_break_threshold or abs(x_diff) > 15: 
+                block_features["is_intentional_newline"] = True
+                block_features["is_paragraph_start"] = True
+            
+            elif (vertical_gap > typical_line_spacing_threshold and vertical_gap < paragraph_break_threshold) or \
+                 (re.search(r'[.?!]$', prev_block["text"].strip()) and block["text"].strip() and block["text"].strip()[0].isupper()):
+                block_features["is_intentional_newline"] = True
+                block_features["is_paragraph_start"] = True 
+
+            else:
+                 block_features["is_intentional_newline"] = True 
+                 block_features["is_paragraph_start"] = True
+
+        else: 
+            block_features["is_paragraph_start"] = True
+
+        blocks_tagged_with_line_features.append(block_features)
+
+    # --- Step 4: Second pass: Perform merges to form "complete word bodies" ---
+    final_logical_blocks = []
+    i = 0
+    while i < len(blocks_tagged_with_line_features):
+        current_block = blocks_tagged_with_line_features[i]
+        
+        merged_block_candidate = current_block.copy()
+        
+        is_body_paragraph_candidate = False
+        if current_block["is_intentional_newline"] and \
+           (current_block.get("font_size_ratio_to_common", 1.0) > 0.9 and current_block.get("font_size_ratio_to_common", 1.0) < 1.15) and \
+           not current_block.get("is_bold", False) and \
+           current_block.get("relative_x0_to_common", 0) > -5 and current_block.get("relative_x0_to_common", 0) < 20: 
+            is_body_paragraph_candidate = True 
+
+        merged_block_candidate["is_descriptive_continuation_of_numbered_heading"] = False
+
+        j = i + 1
+        while j < len(blocks_tagged_with_line_features):
+            next_block = blocks_tagged_with_line_features[j]
+
+            if next_block["page"] != merged_block_candidate["page"]:
+                break 
+
+            if next_block["is_intentional_newline"]:
+                break 
+
+            should_merge_this_iteration = False
+            if next_block["is_line_wrapped"] and not next_block.get("is_header_footer", False):
+                if abs(next_block["font_size"] - merged_block_candidate["font_size"]) < 0.5 and \
+                   next_block["font_name"].split('+')[-1] == merged_block_candidate["font_name"].split('+')[-1]:
+                    should_merge_this_iteration = True
+            
+            # NEW MERGE CLAUSE: Prioritize merge if current block has unclosed parentheses/brackets
+            if _has_unclosed_parentheses_brackets(merged_block_candidate["text"]) and \
+               re.search(r'[\)\]\}]', next_block["text"].strip()): 
+                should_merge_this_iteration = True
+                
+            # NEW MERGE CLAUSE: Merge if the current block is a numbered/bulleted item and the next line is its descriptive continuation
+            if merged_block_candidate.get("starts_with_number_or_bullet", False) and \
+               not merged_block_candidate.get("is_body_paragraph_candidate", False) and \
+               (abs(next_block["x0"] - merged_block_candidate["x0"]) < 10 or (next_block["x0"] > merged_block_candidate["x0"] and next_block["x0"] < merged_block_candidate["x0"] + 50)) and \
+               abs(next_block["font_size"] - merged_block_candidate["font_size"]) < 0.5 and \
+               not re.search(r'[.?!]$', merged_block_candidate["text"].strip()) and \
+               not next_block.get("starts_with_number_or_bullet", False) and \
+               not next_block["is_intentional_newline"]: 
+                should_merge_this_iteration = True
+                merged_block_candidate["is_descriptive_continuation_of_numbered_heading"] = True 
+
+            if should_merge_this_iteration:
+                if len(merged_block_candidate["text"]) + len(next_block["text"]) > 1000: 
+                    break 
+
+                merged_text = merged_block_candidate["text"]
                 if merged_text.strip().endswith('-'):
-                    merged_text = merged_text.strip()[:-1]  # Remove hyphen
+                    merged_text = merged_text.strip()[:-1] 
                 else:
-                    merged_text += " " # Add space between merged lines
+                    merged_text += " " 
 
-                logical_block["text"] = (merged_text + next_block["text"]).strip()
-                logical_block["bottom"] = next_block["bottom"]
-                logical_block["height"] = logical_block["bottom"] - logical_block["top"]
-                logical_block["x0"] = min(logical_block["x0"], next_block["x0"]) # Expand x0 to the left if next block starts earlier
-                logical_block["x1"] = max(logical_block.get("x1", logical_block["x0"] + logical_block["width"]), next_block.get("x1", next_block["x0"] + next_block["width"]))
-                logical_block["width"] = logical_block["x1"] - logical_block["x0"]
-
-                # Preserve bold/italic if any part was bold/italic
-                logical_block["is_bold"] = logical_block.get("is_bold", False) or next_block.get("is_bold", False)
-                logical_block["is_italic"] = logical_block.get("is_italic", False) or next_block.get("is_italic", False)
-                logical_block["line_height"] = logical_block["height"] # Recalculate line height based on new extent
+                merged_block_candidate["text"] = (merged_text + next_block["text"]).strip()
+                merged_block_candidate["bottom"] = next_block["bottom"]
+                merged_block_candidate["height"] = merged_block_candidate["bottom"] - merged_block_candidate["top"]
+                merged_block_candidate["x0"] = min(merged_block_candidate["x0"], next_block["x0"]) 
+                merged_block_candidate["x1"] = max(merged_block_candidate.get("x1", merged_block_candidate["x0"] + merged_block_candidate["width"]), next_block.get("x1", next_block["x0"] + next_block["width"]))
+                merged_block_candidate["width"] = merged_block_candidate["x1"] - merged_block_candidate["x0"]
+                merged_block_candidate["font_size"] = max(merged_block_candidate["font_size"], next_block["font_size"])
+                merged_block_candidate["is_bold"] = merged_block_candidate.get("is_bold", False) or next_block.get("is_bold", False)
+                merged_block_candidate["is_italic"] = merged_block_candidate.get("is_italic", False) or next_block.get("is_italic", False)
+                merged_block_candidate["line_height"] = max(merged_block_candidate.get("line_height", 0), next_block.get("line_height", 0), merged_block_candidate["height"])
 
                 j += 1
             else:
-                break # Cannot merge current and next
+                break 
 
-        logical_blocks.append(logical_block)
-        i = j
+        num_words_merged_body = len(merged_block_candidate["text"].split())
+        merged_block_candidate["_exclude_from_outline_classification"] = False 
+
+        if num_words_merged_body > 15:
+            merged_block_candidate["_exclude_from_outline_classification"] = True
+        
+        merged_block_candidate["is_body_paragraph_candidate"] = is_body_paragraph_candidate
+
+        final_logical_blocks.append(merged_block_candidate)
+        i = j 
     
-    # After merging, re-sort as merging can slightly alter order if x0 was significantly adjusted
-    logical_blocks.sort(key=itemgetter("page", "top", "x0"))
-    return logical_blocks
+    return final_logical_blocks
 
 
-def calculate_all_features(blocks, page_dimensions):
+def check_meaningful_fragment(text, nlp_model, detected_lang="und"):
+    """
+    Uses NLP to check if a block of text is a complete sentence or a meaningful fragment.
+    This version is designed to be more permissive for structured, short fragments
+    that are common in PDFs (e.g., list items, labels), while still catching gibberish.
+    Date-time specific pruning is *removed* from here and handled later.
+    Returns True if meaningful/likely part of content, False if likely noise/gibberish.
+    """
+    if not text or not nlp_model:
+        return False
+    
+    cleaned_text_strip = text.strip()
+    if not cleaned_text_strip:
+        return False
+
+    # Allow very short numeric/alphanumeric items like "1", "A", "2003"
+    if len(cleaned_text_strip) < 5 and any(c.isalnum() for c in cleaned_text_strip) and \
+       re.match(r'^[\d\w.\-]+$', cleaned_text_strip): 
+        return True 
+
+    doc = nlp_model(cleaned_text_strip)
+    is_cjk = detected_lang in ["zh", "ja", "ko"]
+
+    # --- Rule 1: Very low alphanumeric content suggests noise ---
+    alpha_digit_count = sum(1 for c in cleaned_text_strip if c.isalnum())
+    total_chars = len(cleaned_text_strip) + 1e-9
+    alpha_digit_ratio = alpha_digit_count / total_chars 
+    
+    if alpha_digit_ratio < 0.10: 
+        if re.match(r'^\s*(\d{1,4}([-/\\.]\d{1,4}){0,2}|[A-Za-z]\d{1,3})\s*$', cleaned_text_strip): 
+            return True
+        return False 
+
+    # --- Rule 2: Fragmentation heuristics (for non-CJK) ---
+    if not is_cjk:
+        num_sentences = len(list(doc.sents))
+        if num_sentences == 0: 
+            if len(cleaned_text_strip.split()) < 3 and len(cleaned_text_strip) < 10:
+                if re.match(r'^\s*([A-Za-z]+\d*|\d+[A-Za-z]*)$', cleaned_text_strip): 
+                    return True
+                return False
+            if len(cleaned_text_strip.split()) > 5 and not re.search(r'[a-zA-Z]', cleaned_text_strip):
+                return False
+
+    # --- Rule 3: Heuristic for fragmented appearance (few spaces in long text) - primarily for non-CJK ---
+    if not is_cjk:
+        space_count = cleaned_text_strip.count(' ')
+        if len(cleaned_text_strip) > 50 and space_count / (len(cleaned_text_strip) + 1e-9) < 0.01:
+            return False
+
+    # --- Rule 4: Detect and filter general standalone meaningless content explicitly ---
+    
+    # Check for pure list markers / short roman numerals (allow if bold/large, otherwise prune)
+    if re.fullmatch(r"^\s*(\d+(\.\d+)*\s*|[A-Z]\s*|[IVXLCDM]+\s*|[O●■*◆→\-])\s*$", cleaned_text_strip):
+        if len(cleaned_text_strip) <= 4 and re.fullmatch(r'[\d\.]+', cleaned_text_strip):
+            return False 
+        return True 
+    
+    # Common short labels/phrases that are meaningful (e.g., "Name:", "Contact Info")
+    if len(cleaned_text_strip) < 50 and re.match(r'^\s*([A-Z][a-z\s]*){1,6}:?\s*$', cleaned_text_strip):
+        if sum(c.isalpha() for c in cleaned_text_strip) < 5 and not cleaned_text_strip.endswith(':'):
+            return False 
+        return True
+
+    return True 
+
+
+def filter_blocks_for_classification(logical_blocks, nlp_model, detected_lang):
+    """
+    Applies strict pruning rules to logical blocks before feature calculation and classification.
+    This now has a two-tiered pruning: hard prune (continue) for absolute garbage,
+    and soft prune (setting flags) for meaningful content that's not for outline headings.
+    """
+    filtered_blocks = []
+    for block in logical_blocks:
+        cleaned_text = block["text"].strip()
+        
+        # --- Tier 1: Hard Prune (discard for both outline AND summary) ---
+        # 1. Drop header-footer
+        if block.get("is_header_footer", False):
+            continue
+
+        # 2. Drop empty blocks or blocks with very little content that's purely whitespace
+        if not cleaned_text:
+            continue
+
+        # 3. Drop lines with decorative lines only (e.g., '---', '....')
+        if re.fullmatch(r'[\s\-—_•*●■]*', cleaned_text) and len(set(cleaned_text.replace(" ", ""))) < 3:
+            if len(cleaned_text) > 2: 
+                continue 
+
+        # 4. Drop lines with only numbers/symbols and NO alphanumeric content, or are short numbers
+        alphanumeric_content = re.sub(r'[^a-zA-Z0-9]', '', cleaned_text)
+        if not alphanumeric_content and len(cleaned_text) < 20: 
+            continue 
+
+        # Check specifically for standalone short numbers or roman numerals that are often just page numbers
+        if re.fullmatch(r'^\s*(\d{1,5}|\(?[\d]+\)?|\s*[IVXLCDM]+\s*)\s*$', cleaned_text, re.IGNORECASE) and len(cleaned_text) < 8:
+            if not block.get("is_bold", False) and block.get("font_size_ratio_to_common", 1.0) < 1.1:
+                continue 
+
+        # 5. Drop lines that don't have a continuous text sequences (e.g., scrambled text)
+        is_cjk = detected_lang in ["zh", "ja", "ko"]
+        if not is_cjk:
+            has_meaningful_sequence = False
+            words = cleaned_text.split()
+            if not words and len(cleaned_text) > 5: 
+                continue 
+
+            for word in words:
+                alpha_chars = ''.join(c for c in word if c.isalpha())
+                if len(alpha_chars) >= 3 and any(vowel in alpha_chars.lower() for vowel in 'aeiou'):
+                    has_meaningful_sequence = True
+                    break
+                if len(alpha_chars) >= 3 and sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars) > 0.5:
+                    has_meaningful_sequence = True
+                    break
+            if not has_meaningful_sequence and len(cleaned_text) < 20: 
+                continue
+        
+        # --- Tier 2: Soft Prune (mark for outline exclusion, but retain for summary) ---
+        block["_exclude_from_outline_classification"] = block.get("_exclude_from_outline_classification", False)
+
+        # Apply NLP-based meaningful fragment check (strict for outline, but passes for summary if True)
+        if nlp_model and not check_meaningful_fragment(cleaned_text, nlp_model, detected_lang):
+            block["is_meaningful_fragment"] = False 
+            continue 
+        else:
+            block["is_meaningful_fragment"] = True 
+
+        if block.get("is_body_paragraph_candidate", False): 
+            block["_exclude_from_outline_classification"] = True
+
+        filtered_blocks.append(block)
+    return filtered_blocks
+
+
+def calculate_all_features(blocks, page_dimensions, detected_lang="und"):
     """
     Calculates intrinsic and contextual features for all blocks.
     Assumes blocks are already sorted by page, then top, then x0.
-    page_dimensions: A dictionary {page_num: {"width", "height"}}
+    Adds `is_standalone_date_time_combo` flag and `font_size_rank`.
     """
     if not blocks:
         return [], 0
 
-    # First, run `build_logical_blocks` to get coherent text units
-    # This might already be done in extract_blocks, but doing it here ensures consistency
-    # and accounts for any further merging desired specifically for classification.
-    logical_blocks = build_logical_blocks(blocks)
-    blocks = logical_blocks # Use these now for feature extraction
-
     all_font_sizes = [block_item["font_size"] for block_item in blocks if block_item["font_size"] is not None and block_item["font_size"] > 0]
     
     if not all_font_sizes:
-        most_common_font_size = 12.0 # Default if no font sizes
+        most_common_font_size = 12.0 
     else:
         try:
-            # Use median as it's more robust to outliers than mode for "common" text size
             most_common_font_size = statistics.median(all_font_sizes)
-        except statistics.StatisticsError: # If only one unique size
+        except statistics.StatisticsError:
             most_common_font_size = all_font_sizes[0] if all_font_sizes else 12.0
         
         if most_common_font_size == 0:
-            most_common_font_size = 12.0
+            most_common_font_size = 12.0 
 
-
-    blocks_by_page = collections.defaultdict(list)
+    blocks_by_page = collections.defaultdict(list) 
     for block_item in blocks:
         blocks_by_page.setdefault(block_item["page"], []).append(block_item)
     
     page_layout_info = {}
     for page_num, page_blocks_list in blocks_by_page.items():
-        if not page_blocks_list: continue # Skip empty pages
+        if not page_blocks_list: continue 
         min_x0_page = min(b["x0"] for b in page_blocks_list)
         max_x1_page = max(b["x0"] + b["width"] for b in page_blocks_list)
         
-        # Consider average text line x0 as a more stable reference than absolute min_x0
-        # Exclude header/footers from this average as they might skew it
         content_x0s = [b["x0"] for b in page_blocks_list if not b.get("is_header_footer", False) and b["text"].strip()]
-        avg_x0_page = statistics.mean(content_x0s) if content_x0s else min_x0_page # Fallback
+        avg_x0_page = statistics.mean(content_x0s) if content_x0s else min_x0_page 
 
         page_layout_info[page_num] = {
             "min_x0": min_x0_page,
@@ -200,11 +493,13 @@ def calculate_all_features(blocks, page_dimensions):
             page_layout_info[page_num]["page_width"] = page_dimensions[page_num]["width"]
             page_layout_info[page_num]["page_height"] = page_dimensions[page_num]["height"]
         else:
-            page_layout_info[page_num]["page_width"] = 595.0 # A4 width in points
-            page_layout_info[page_num]["page_height"] = 842.0 # A4 height in points
-
+            page_layout_info[page_num]["page_width"] = 595.0 
+            page_layout_info[page_num]["page_height"] = 842.0 
 
     processed_blocks = []
+    unique_font_sizes_sorted = sorted(list(set(s for s in all_font_sizes if s > 0)), reverse=True) 
+    font_size_rank_map = {size: rank for rank, size in enumerate(unique_font_sizes_sorted)}
+
     for i, block_orig in enumerate(blocks):
         features = {
             "text": block_orig["text"],
@@ -218,77 +513,42 @@ def calculate_all_features(blocks, page_dimensions):
             "height": block_orig.get("height", most_common_font_size),
             "page": block_orig["page"],
             "line_height": block_orig.get("line_height", block_orig.get("height", most_common_font_size)),
-            "lang": "und", # Undetermined
-            "is_all_caps": False,
+            "lang": detected_lang, 
+            "is_all_caps": False, 
             "line_length": len(block_orig["text"]),
-            "num_words": 0,
-            "starts_with_number_or_bullet": False,
-            "is_short_line": False,
-            "is_decorative_line": False,
-            "is_pure_number_or_symbol_line": False,
-            "is_table_like_element": False,
-            "is_quote_or_citation": False,
-            "is_form_field_label": False,
-            "is_tagline_or_url": False,
-            "is_fragmented_noise": False,
-            "is_header_footer": block_orig.get("is_header_footer", False),
+            "num_words": 0, 
+            "starts_with_number_or_bullet": False, 
+            "is_short_line": False, 
+            "is_header_footer": block_orig.get("is_header_footer", False), 
             "is_smaller_than_predecessor_and_not_body": False,
-            "x0_normalized": 0.0, # Normalized x0 relative to page width or text frame
-            "relative_x0_to_common": 0.0 # Relative to common text block x0 on page
+            "x0_normalized": 0.0, 
+            "relative_x0_to_common": 0.0,
+            "is_meaningful_fragment": block_orig.get("is_meaningful_fragment", True), 
+            "_exclude_from_outline_classification": block_orig.get("_exclude_from_outline_classification", False), 
+            "is_body_paragraph_candidate": block_orig.get("is_body_paragraph_candidate", False),
+            "is_standalone_date_time_combo": False,
+            "font_size_rank": font_size_rank_map.get(block_orig.get("font_size"), len(unique_font_sizes_sorted)) 
         }
 
-        # Handle zero font size
         if features["font_size"] == 0:
             features["font_size"] = most_common_font_size
 
         features["font_size_ratio_to_common"] = features["font_size"] / most_common_font_size
         features["font_size_deviation_from_common"] = features["font_size"] - most_common_font_size
 
-        if nlp:
-            try:
-                # Use a smaller slice for faster language detection if the block is very long
-                doc = nlp(features["text"][:500])
-                # Access _ attribute for LanguageDetector result
-                if hasattr(doc, "_") and hasattr(doc._, "language") and doc._.language['language'] != "un":
-                    features["lang"] = doc._.language['language']
-            except Exception:
-                pass # Lang detection can fail, default to "und"
-        
-        is_cjk = features["lang"] in ["zh", "ja", "ko"]
+        is_cjk = features["lang"] in ["zh", "ja", "ko"] 
 
-        features["is_all_caps"] = False if is_cjk else (features["text"].isupper() and 2 < len(features["text"]) < 50 and any(c.isalpha() for c in features["text"]))
+        if not is_cjk and len(features["text"]) > 2 and features["text"].isupper() and any(c.isalpha() for c in features["text"]):
+            features["is_all_caps"] = True
         
         features["num_words"] = len(features["text"]) if is_cjk else len(features["text"].split())
 
         features["starts_with_number_or_bullet"] = bool(
-            re.match(r"^\s*(\d+(\.\d+)*[\s.)\]}]?\s*|[A-Za-z][.)\]}]?\s*|[IVXLCDM]+\s*[.)\]]?\s*|[O●■*◆→\-])", features["text"].strip()) and \
-            not re.fullmatch(r'[\s\-—_]{3,}', features["text"].strip()) # Exclude pure separators
+            re.match(r"^\s*(\d+(\.\d+)*[\s.)\]}]?\s*|[A-Za-z][.)\]}]?\s*|[IVXLCDM]+\s*[.)\]]?\s*|[O●■*◆→\-])", features["text"].strip())
         )
         
-        cleaned_text = features["text"].strip()
-        # Refined decorative line detection
-        if (len(cleaned_text) > 2 and re.fullmatch(r'[\s\-—_•*●■]*', cleaned_text) and len(set(cleaned_text.replace(" ", ""))) < 3) or \
-           (len(cleaned_text) == 1 and cleaned_text in "O●■*" and not features["starts_with_number_or_bullet"]) or \
-           (len(cleaned_text) == 1 and cleaned_text.lower() == "o" and not features["is_bold"] and features["font_size_ratio_to_common"] < 1.05 and not features["starts_with_number_or_bullet"]) or \
-           (re.fullmatch(r'^-+$', cleaned_text)): # Pure dashes as separators
-            features["is_decorative_line"] = True
-            features["is_pure_number_or_symbol_line"] = True # Often overlaps
-
-        alphanumeric_content = re.sub(r'[^a-zA-Z0-9]', '', cleaned_text)
-        
-        # Refined pure number/symbol line detection
-        if not alphanumeric_content and len(cleaned_text) < 15: # No alphanumeric content, very short
-            features["is_pure_number_or_symbol_line"] = True
-        elif (cleaned_text.isdigit() or (cleaned_text.endswith('.') and cleaned_text[:-1].isdigit())) and len(cleaned_text) <= 5:
-            if features["num_words"] == 1 and not features["is_bold"] and features["font_size_ratio_to_common"] < 1.15:
-                features["is_pure_number_or_symbol_line"] = True
-        elif (re.fullmatch(r'^[IVXLCDM]+\.$', cleaned_text) or re.fullmatch(r'^[A-Z]\.$', cleaned_text)) and (len(cleaned_text) <= 3 and not features["is_bold"]):
-             features["is_pure_number_or_symbol_line"] = True
-
-
         features["is_short_line"] = (len(features["text"]) < 70) and \
                                      ((features["num_words"] < 12) or (is_cjk and features["num_words"] < 25))
-
 
         prev_block = blocks[i-1] if i > 0 and blocks[i-1]["page"] == block_orig["page"] else None
         next_block = blocks[i+1] if i < len(blocks) - 1 and blocks[i+1]["page"] == block_orig["page"] else None
@@ -301,16 +561,14 @@ def calculate_all_features(blocks, page_dimensions):
             features["prev_y_gap"] = abs(features["top"] - prev_block["bottom"])
             features["prev_x_diff"] = features["x0"] - prev_block["x0"]
             
-            # Use average line height of current block for relative comparison
             current_line_height = features.get("line_height", features.get("height", most_common_font_size))
-            features["is_preceded_by_larger_gap"] = features["prev_y_gap"] > current_line_height * 1.8 # Larger gap before
+            features["is_preceded_by_larger_gap"] = features["prev_y_gap"] > current_line_height * 1.8 
             
-            # Check for font size regression indicating a sub-item, not a major heading
             if features["font_size"] < prev_block["font_size"] * 0.9 and \
                features["font_size_ratio_to_common"] > 0.95 and \
                not prev_block.get("is_bold", False) and \
                len(prev_block["text"].strip()) > 10 and \
-               not re.match(r'[.?!]$', prev_block["text"].strip()): # If previous block doesn't end a sentence
+               not re.match(r'[.?!]$', prev_block["text"].strip()): 
                 features["is_smaller_than_predecessor_and_not_body"] = True
             else:
                 features["is_smaller_than_predecessor_and_not_body"] = False
@@ -319,9 +577,8 @@ def calculate_all_features(blocks, page_dimensions):
             features["prev_font_size"] = 0
             features["prev_y_gap"] = 0
             features["prev_x_diff"] = 0
-            features["is_preceded_by_larger_gap"] = True # First block on page might act like one if positioned well
+            features["is_preceded_by_larger_gap"] = True
             features["is_smaller_than_predecessor_and_not_body"] = False
-
 
         if next_block:
             features["next_font_size"] = next_block["font_size"]
@@ -329,7 +586,6 @@ def calculate_all_features(blocks, page_dimensions):
             features["next_x_diff"] = next_block["x0"] - features["x0"]
             features["is_followed_by_smaller_text"] = next_block["font_size"] < features["font_size"] * 0.9
             
-            # Use average line height of current block for relative comparison
             current_line_height = features.get("line_height", features.get("height", most_common_font_size))
             features["is_followed_by_larger_gap"] = features["next_y_gap"] > current_line_height * 1.8
         else:
@@ -337,73 +593,41 @@ def calculate_all_features(blocks, page_dimensions):
             features["next_y_gap"] = 0
             features["next_x_diff"] = 0
             features["is_followed_by_smaller_text"] = False
-            features["is_followed_by_larger_gap"] = True # Last block on page might act like one
+            features["is_followed_by_larger_gap"] = True
 
         page_info = page_layout_info.get(features["page"])
         if page_info and page_info["page_width"] > 0:
             page_width = page_info["page_width"]
-            page_height = page_info["page_height"]
             
             block_center_x = features["x0"] + features["width"] / 2
             page_center_x = page_width / 2
-            features["is_centered"] = abs(block_center_x - page_center_x) < (page_width * 0.05) # Within 5% of center
+            features["is_centered"] = abs(block_center_x - page_center_x) < (page_width * 0.05)
 
-            # Normalize x0 relative to page width
             features["x0_normalized"] = features["x0"] / page_width
-            
-            # Relative x0 to common starting point of main body text
-            # Ensure avg_x0_page is not None/0 before subtraction
             features["relative_x0_to_common"] = features["x0"] - page_info["avg_x0"] if page_info.get("avg_x0") else 0
-
-
         else:
             features["is_centered"] = False
-            features["x0_normalized"] = features["x0"] / 595.0 # Fallback to A4 width
-            features["relative_x0_to_common"] = 0.0 # Cannot calculate without avg_x0
-
-
-        # Table-like element detection (e.g., side-by-side text, list items with multiple columns)
-        current_page_blocks_list = blocks_by_page.get(features["page"], [])
-        num_short_bold_neighbors_at_same_y = 0
-        y_tolerance = features["line_height"] * 0.7 # Tolerance for being on the same visual line
+            features["x0_normalized"] = features["x0"] / 595.0 
+            features["relative_x0_to_common"] = 0.0 
         
-        for other_block in current_page_blocks_list:
-            if other_block == block_orig: continue # Don't compare with self
-            
-            # Check if another block is on roughly the same horizontal level (y-axis)
-            is_same_y_level = (other_block["top"] >= features["top"] - y_tolerance and
-                               other_block["top"] <= features["top"] + y_tolerance) or \
-                              (other_block["bottom"] >= features["bottom"] - y_tolerance and
-                               other_block["bottom"] <= features["bottom"] + y_tolerance)
-
-
-            if is_same_y_level and \
-               other_block["x0"] != features["x0"] and \
-               len(other_block["text"].strip()) < 50 and \
-               (other_block.get("is_bold", False) or other_block.get("starts_with_number_or_bullet", False) or (other_block.get("font_size_ratio_to_common", 0) > 1.05)):
-                num_short_bold_neighbors_at_same_y += 1
+        date_time_patterns = [
+            r'^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*\d{1,2}\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{4}\s*\d{1,2}:\d{2}:\d{2}(?:\s*(?:AM|PM))?$', 
+            r'^\d{1,2}[-/\\.]\d{1,2}[-/\\.]\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM))?)?$', 
+            r'^\d{4}[-/\\.]\d{1,2}[-/\\.]\d{1,2}(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM))?)?$', 
+            r'^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{1,2},?\s*\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM))?)?$', 
+            r'^\d{1,2}:\d{2}(?::\d{2})?(?:\s*(?:AM|PM))?$', 
+            r'^\d{4}$' 
+        ]
+        is_date_time_combo = False
+        for pattern in date_time_patterns:
+            if re.fullmatch(pattern, features["text"].strip(), re.IGNORECASE):
+                is_date_time_combo = True
+                break
         
-        if num_short_bold_neighbors_at_same_y >= 1:
-            features["is_table_like_element"] = True
-
-        # Form field label heuristic
-        if re.match(r"^\s*[A-Z][A-Z\s]*:\s*$", cleaned_text) or \
-           (len(cleaned_text.split()) <= 4 and cleaned_text.endswith(":") and features["is_bold"] and features["font_size_ratio_to_common"] >= 1.0):
-            features["is_form_field_label"] = True
-            features["is_table_like_element"] = True # Form labels are often tabular in nature
-
-        # Quote or citation detection
-        if re.match(r"^\s*[\"„“\u201c\u201d]", cleaned_text) or \
-           (features["x0"] > (page_info["min_x0"] + 20 if page_info else 20) and # Indented
-            features["width"] < (page_info["page_width"] * 0.75 if page_info else 450) and # Narrower
-            features["font_size_ratio_to_common"] < 1.05 and # Not a heading font
-            features["is_italic"] and len(cleaned_text) > 50): # Longer italic block
-            features["is_quote_or_citation"] = True
-
-        # Tagline or URL detection
-        if re.match(r"^(www\.|http[s]?://|ftp://)", cleaned_text, re.IGNORECASE) or \
-           (features["is_last_on_page"] and features["font_size_ratio_to_common"] < 0.9 and len(cleaned_text.split()) < 15 and not features["starts_with_number_or_bullet"] and not features["is_all_caps"] and not features["is_bold"]):
-            features["is_tagline_or_url"] = True
+        if is_date_time_combo and not features["is_bold"] and features["font_size_ratio_to_common"] < 1.15 and not features["starts_with_number_or_bullet"]:
+            features["is_standalone_date_time_combo"] = True
+        else:
+            features["is_standalone_date_time_combo"] = False 
 
         block_orig.update(features)
         processed_blocks.append(block_orig)
@@ -415,241 +639,228 @@ def dynamic_thresholds(all_font_sizes, most_common_font_size):
     Prioritizes distinct large font sizes.
     """
     if not all_font_sizes or most_common_font_size == 0:
-        return {"H1": 16.0, "H2": 14.0, "H3": 12.0, "H4": 11.0} # Fallback to default
+        return {"H1": 16.0, "H2": 14.0, "H3": 12.0, "H4": 11.0} 
 
-    # Filter out very small or very large outliers (e.g., logos, single characters)
     filtered_sizes = [s for s in all_font_sizes if most_common_font_size * 0.7 < s < most_common_font_size * 3.0]
     if not filtered_sizes:
-        filtered_sizes = all_font_sizes # Use all if filtering made it empty
+        filtered_sizes = all_font_sizes 
 
-    # Count occurrences of each unique size
-    size_counts = collections.Counter(filtered_sizes)
-    # Sort unique sizes by value (descending)
-    unique_sorted_sizes = sorted(size_counts.keys(), reverse=True)
-
+    unique_sorted_sizes = sorted(list(set(s for s in filtered_sizes if s >= most_common_font_size * 1.05)), reverse=True) 
+    
     thresholds = {}
     
-    # Identify potential heading sizes based on distinct font jumps
-    # Start with sizes significantly larger than the common body text
-    candidate_heading_sizes = [s for s in unique_sorted_sizes if s >= most_common_font_size * 1.1] # Lower threshold for candidates
-    candidate_heading_sizes = sorted(list(set(candidate_heading_sizes)), reverse=True) # Ensure uniqueness and sort again
-
-    # Assign levels based on relative size, trying to find distinct jumps
-    if len(candidate_heading_sizes) > 0:
-        thresholds["H1"] = candidate_heading_sizes[0]
-        # Iterate to find distinct levels, with a minimum size difference between levels
+    if len(unique_sorted_sizes) > 0:
+        thresholds["H1"] = unique_sorted_sizes[0]
         current_h_level = 2
-        for i in range(1, len(candidate_heading_sizes)):
-            prev_size = candidate_heading_sizes[i-1]
-            current_size = candidate_heading_sizes[i]
-            # If there's a noticeable drop from the previous largest heading candidate
-            if (prev_size - current_size) >= 1.0 and current_size >= most_common_font_size * 1.05:
+        for i in range(1, len(unique_sorted_sizes)):
+            prev_size = unique_sorted_sizes[i-1]
+            current_size = unique_sorted_sizes[i]
+            if (prev_size - current_size) >= 0.75 and current_size >= most_common_font_size * 1.05: 
                  if current_h_level <= 4:
-                     thresholds[f"H{current_h_level}"] = current_size
-                     current_h_level += 1
+                    thresholds[f"H{current_h_level}"] = current_size
+                    current_h_level += 1
                  else:
-                     break # Found enough heading levels
+                    break 
 
-    # Ensure a sensible hierarchy and minimum size differences if not enough distinct sizes found
     if "H1" not in thresholds:
         thresholds["H1"] = most_common_font_size + 6.0
     
-    # Ensure H2 is smaller than H1, etc., with a minimum step down
-    if "H2" not in thresholds or thresholds["H2"] >= thresholds["H1"] - 0.75:
-        thresholds["H2"] = thresholds["H1"] - 2.0
-    
-    if "H3" not in thresholds or thresholds["H3"] >= thresholds["H2"] - 0.75:
-        thresholds["H3"] = thresholds["H2"] - 1.5
+    h_keys = ["H1", "H2", "H3", "H4"]
+    for i in range(1, len(h_keys)):
+        current_key = h_keys[i]
+        prev_key = h_keys[i-1]
+        
+        if current_key not in thresholds or thresholds[current_key] >= thresholds[prev_key] - 0.5:
+            thresholds[current_key] = thresholds[prev_key] - (2.0 if current_key == "H2" else 1.5 if current_key == "H3" else 1.0)
+        
+        if current_key == "H2" and thresholds[current_key] < most_common_font_size * 1.15: thresholds[current_key] = most_common_font_size * 1.15
+        if current_key == "H3" and thresholds[current_key] < most_common_font_size * 1.1: thresholds[current_key] = most_common_font_size * 1.1
+        if current_key == "H4" and thresholds[current_key] < most_common_font_size * 1.05: thresholds[current_key] = most_common_font_size * 1.05
 
-    if "H4" not in thresholds or thresholds["H4"] >= thresholds["H3"] - 0.75:
-        thresholds["H4"] = thresholds["H3"] - 1.0
-
-    # Ensure no heading is smaller than common font size
-    for key in ["H1", "H2", "H3", "H4"]:
-        if thresholds[key] < most_common_font_size * 1.05:
-            thresholds[key] = most_common_font_size * 1.05
+    for i in range(1, len(h_keys)):
+        if thresholds[h_keys[i]] >= thresholds[h_keys[i-1]]:
+            thresholds[h_keys[i]] = thresholds[h_keys[i-1]] - 0.5 
 
     return thresholds
 
 
-def classify_block_heuristic(block, dynamic_th, common_font_size):
+def classify_block_hybrid_score(block, dynamic_th, common_font_size):
     """
     Classifies a single block using a weighted heuristic scoring approach,
-    leveraging intrinsic and contextual features.
-    Returns the heading level (e.g., "H1", "H2") or None if it's body text/other.
+    combining regex matches with visual and contextual features.
+    Strongly penalizes blocks marked for outline exclusion or as body paragraphs.
+    Applies strict text length constraints for outline headings.
     """
-    # IMMEDIATE AND CRITICAL FILTERING FOR NON-MEANINGFUL / DECORATIVE LINES / TABLE ELEMENTS / QUOTES / TAGLINES / HEADERS/FOOTERS
-    if block.get("is_decorative_line", False) or \
-       block.get("is_pure_number_or_symbol_line", False) or \
-       block.get("is_table_like_element", False) or \
-       block.get("is_quote_or_citation", False) or \
-       block.get("is_tagline_or_url", False) or \
-       block.get("is_header_footer", False) or \
-       len(block["text"].strip()) < 2: # Very short texts are rarely headings unless they are numbers/bullets handled below
-        return None
+    cleaned_text = block["text"].strip()
+    
+    is_bold = block.get("is_bold", False)
+    starts_with_number_or_bullet = block.get("starts_with_number_or_bullet", False)
+    font_size_ratio_to_common = block.get("font_size_ratio_to_common", 1.0)
+    font_size = block.get("font_size", common_font_size)
+    font_size_rank = block.get("font_size_rank", 999) 
+    is_followed_by_smaller_text = block.get("is_followed_by_smaller_text", False)
+    num_words = block.get("num_words", 0)
+    line_length = block.get("line_length", 0)
+    is_centered = block.get("is_centered", False)
+    is_preceded_by_larger_gap = block.get("is_preceded_by_larger_gap", False)
+    is_first_on_page = block.get("is_first_on_page", False)
+    is_all_caps = block.get("is_all_caps", False)
+    is_short_line = block.get("is_short_line", False)
+    is_smaller_than_predecessor_and_not_body = block.get("is_smaller_than_predecessor_and_not_body", False)
+    relative_x0_to_common = block.get("relative_x0_to_common", 0)
+    
+    _exclude_from_outline_classification = block.get("_exclude_from_outline_classification", False)
+    is_body_paragraph_candidate = block.get("is_body_paragraph_candidate", False)
+    is_standalone_date_time_combo = block.get("is_standalone_date_time_combo", False)
 
+    regex_matches = _get_heading_regex_matches(cleaned_text)
+    
     weights_base = {
-        "font_size_prominence": 4.0,
-        "is_bold": 4.0,
-        "is_centered": 4.5,
-        "is_preceded_by_larger_gap": 3.5,
-        "is_followed_by_smaller_text": 3.5,
-        "starts_with_number_or_bullet": 3.5,
-        "is_first_on_page": 2.5,
-        "is_all_caps": 1.2,
-        "is_short_line": 1.0,
-        "length_penalty_factor": -0.2,
-        "is_smaller_than_predecessor_and_not_body": 1.5,
-        "font_size_ratio_H1_boost": 2.0,
-        "font_size_ratio_H2_boost": 1.5,
-        "font_size_ratio_H3_boost": 1.2,
-        "font_size_ratio_H4_boost": 1.0,
-        "x0_indent_penalty": -0.5 # Penalty for significant indentation if trying to be a top-level heading
+        "font_size_prominence": 4.5, 
+        "is_bold": 7.0, 
+        "is_centered": 8.0, 
+        "is_preceded_by_larger_gap": 5.5, 
+        "is_followed_by_smaller_text": 5.5, 
+        "starts_with_number_or_bullet": 7.0, 
+        "is_first_on_page": 4.5,
+        "is_all_caps": 3.0,
+        "is_short_line": 2.5,
+        "length_penalty_factor": -0.5, 
+        "is_smaller_than_predecessor_and_not_body": 3.5, 
+        "font_size_ratio_H1_boost": 4.0, 
+        "font_size_ratio_H2_boost": 3.5,
+        "font_size_ratio_H3_boost": 3.0, 
+        "font_size_ratio_H4_boost": 2.5,
+        "x0_indent_penalty": -2.0, 
+        "body_text_penalty": -40.0, 
+        "numbered_heading_short_penalty": -8.0,
+        "standalone_date_time_penalty": -25.0,
+        "regex_match_boost": 20.0 
     }
 
     level_scores = {"H1": 0.0, "H2": 0.0, "H3": 0.0, "H4": 0.0}
     
-    # Calculate base prominence based on font size relative to common
-    base_prominence = (block["font_size_ratio_to_common"] - 1.0) * weights_base["font_size_prominence"]
+    base_prominence = (font_size_ratio_to_common - 1.0) * weights_base["font_size_prominence"]
     if base_prominence < 0: base_prominence = 0
 
-    is_bold = block.get("is_bold", False)
-    is_centered = block.get("is_centered", False)
-    is_preceded_by_larger_gap = block.get("is_preceded_by_larger_gap", False)
-    is_followed_by_smaller_text = block.get("is_followed_by_smaller_text", False)
-    starts_with_number_or_bullet = block.get("starts_with_number_or_bullet", False)
-    is_first_on_page = block.get("is_first_on_page", False)
-    is_all_caps = block.get("is_all_caps", False)
-    is_short_line = block.get("is_short_line", False)
-    num_words = block.get("num_words", 0)
-    is_form_field_label = block.get("is_form_field_label", False)
-    is_smaller_than_predecessor_and_not_body = block.get("is_smaller_than_predecessor_and_not_body", False)
-    relative_x0_to_common = block.get("relative_x0_to_common", 0)
-
-    # Conciseness Penalty: Penalize longer lines that are unlikely to be headings
     length_penalty = 0
-    if num_words > 15:
-        length_penalty = (num_words - 15) * abs(weights_base["length_penalty_factor"])
-    if block["line_length"] > 75: # Character length penalty
-        length_penalty = max(length_penalty, (block["line_length"] - 75) * abs(weights_base["length_penalty_factor"]))
+    if num_words > 5:
+        length_penalty = (num_words - 5) * abs(weights_base["length_penalty_factor"]) * 5 
+    if line_length > 50: 
+        length_penalty = max(length_penalty, (line_length - 50) * abs(weights_base["length_penalty_factor"]) * 5)
     
-    # Penalize if it looks like a paragraph that just happens to be bold/large
-    if num_words > 25 and not starts_with_number_or_bullet and not is_all_caps and block["font_size_ratio_to_common"] < 1.3:
-        length_penalty += 5.0 # Stronger penalty
+    if num_words > 20: 
+        length_penalty += 100.0 
+
+    if _exclude_from_outline_classification or is_body_paragraph_candidate:
+        length_penalty += abs(weights_base["body_text_penalty"])
+
+    if is_standalone_date_time_combo: 
+        length_penalty += abs(weights_base["standalone_date_time_penalty"])
+
+    for match in regex_matches:
+        level_key = match["level"]
+        confidence = match["confidence"]
+        level_scores[level_key] += confidence * weights_base["regex_match_boost"]
 
     # H1 Scoring
     score_h1 = base_prominence * weights_base["font_size_ratio_H1_boost"]
-    if block["font_size"] >= dynamic_th.get("H1", float('inf')) * 0.95: # Direct font size match
-        score_h1 += 10.0
-    if is_bold: score_h1 += weights_base["is_bold"] * 2.5
-    if is_centered: score_h1 += weights_base["is_centered"] * 2.5
-    if is_preceded_by_larger_gap: score_h1 += weights_base["is_preceded_by_larger_gap"] * 2.0
-    if is_first_on_page: score_h1 += weights_base["is_first_on_page"] * 2.5
-    if is_all_caps: score_h1 += weights_base["is_all_caps"] * 1.8
-    if is_short_line and num_words < 12: score_h1 += weights_base["is_short_line"] * 1.8
-    if abs(relative_x0_to_common) < 15: score_h1 += 2.0 # Close to main text block start
+    if font_size >= dynamic_th.get("H1", float('inf')) * 0.95: 
+        score_h1 += 18.0 
+    if is_bold: score_h1 += weights_base["is_bold"] * 3.0
+    if is_centered: score_h1 += weights_base["is_centered"] * 3.5 
+    if is_preceded_by_larger_gap: score_h1 += weights_base["is_preceded_by_larger_gap"] * 3.0
+    if is_first_on_page: score_h1 += weights_base["is_first_on_page"] * 4.0
+    if is_all_caps: score_h1 += weights_base["is_all_caps"] * 2.5
+    if is_short_line and num_words < 10: score_h1 += weights_base["is_short_line"] * 3.0
+    if abs(relative_x0_to_common) < 15: score_h1 += 3.5 
     
-    level_scores["H1"] = score_h1 - length_penalty
+    level_scores["H1"] += score_h1 - length_penalty
 
 
     # H2 Scoring
     score_h2 = base_prominence * weights_base["font_size_ratio_H2_boost"]
-    if block["font_size"] >= dynamic_th.get("H2", float('inf')) * 0.95:
-        score_h2 += 8.0
-    if is_bold: score_h2 += weights_base["is_bold"] * 2.0
-    if is_preceded_by_larger_gap: score_h2 += weights_base["is_preceded_by_larger_gap"] * 1.5
-    if is_followed_by_smaller_text: score_h2 += weights_base["is_followed_by_smaller_text"] * 1.8
-    if starts_with_number_or_bullet: score_h2 += weights_base["starts_with_number_or_bullet"] * 3.5
-    if is_all_caps: score_h2 += weights_base["is_all_caps"] * 1.0
-    if is_short_line and num_words < 18: score_h2 += weights_base["is_short_line"] * 1.5
-    if is_centered: score_h2 += weights_base["is_centered"] * 1.2
-    if is_form_field_label: score_h2 += weights_base["starts_with_number_or_bullet"] * 2.5
-    if is_smaller_than_predecessor_and_not_body: score_h2 += weights_base["is_smaller_than_predecessor_and_not_body"] * 1.5
+    if font_size >= dynamic_th.get("H2", float('inf')) * 0.95:
+        score_h2 += 12.0 
+    if is_bold: score_h2 += weights_base["is_bold"] * 2.5
+    if is_preceded_by_larger_gap: score_h2 += weights_base["is_preceded_by_larger_gap"] * 2.0
+    if is_followed_by_smaller_text: score_h2 += weights_base["is_followed_by_smaller_text"] * 2.5
+    if starts_with_number_or_bullet: score_h2 += weights_base["starts_with_number_or_bullet"] * 5.0 
+    if is_all_caps: score_h2 += weights_base["is_all_caps"] * 2.0
+    if is_short_line and num_words < 15: score_h2 += weights_base["is_short_line"] * 2.5
+    if is_centered: score_h2 += weights_base["is_centered"] * 1.8
+    if is_smaller_than_predecessor_and_not_body: score_h2 += weights_base["is_smaller_than_predecessor_and_not_body"] * 2.5
     
-    # Penalty for large indentation for H2 unless it's a specific numbered list format
-    if relative_x0_to_common > 30 and not starts_with_number_or_bullet:
-        score_h2 += weights_base["x0_indent_penalty"] * 1.0
+    if relative_x0_to_common > 25 and not starts_with_number_or_bullet:
+        score_h2 += weights_base["x0_indent_penalty"] * 1.8
 
-    level_scores["H2"] = score_h2 - length_penalty
+    level_scores["H2"] += score_h2 - length_penalty
 
     # H3 Scoring
     score_h3 = base_prominence * weights_base["font_size_ratio_H3_boost"]
-    if block["font_size"] >= dynamic_th.get("H3", float('inf')) * 0.95:
-        score_h3 += 6.0
-    if is_bold: score_h3 += weights_base["is_bold"] * 1.5
-    if is_preceded_by_larger_gap: score_h3 += weights_base["is_preceded_by_larger_gap"] * 1.2
-    if starts_with_number_or_bullet: score_h3 += weights_base["starts_with_number_or_bullet"] * 4.0
-    if is_followed_by_smaller_text: score_h3 += weights_base["is_followed_by_smaller_text"] * 1.5
-    if is_short_line and num_words < 25: score_h3 += weights_base["is_short_line"] * 1.5
-    if is_form_field_label: score_h3 += weights_base["starts_with_number_or_bullet"] * 3.0
-    if is_smaller_than_predecessor_and_not_body: score_h3 += weights_base["is_smaller_than_predecessor_and_not_body"] * 1.0
+    if font_size >= dynamic_th.get("H3", float('inf')) * 0.95:
+        score_h3 += 10.0 
+    if is_bold: score_h3 += weights_base["is_bold"] * 2.0
+    if is_preceded_by_larger_gap: score_h3 += weights_base["is_preceded_by_larger_gap"] * 1.8
+    if starts_with_number_or_bullet: score_h3 += weights_base["starts_with_number_or_bullet"] * 5.5 
+    if is_followed_by_smaller_text: score_h3 += weights_base["is_followed_by_smaller_text"] * 2.0
+    if is_short_line and num_words < 20: score_h3 += weights_base["is_short_line"] * 1.8
+    if is_smaller_than_predecessor_and_not_body: score_h3 += weights_base["is_smaller_than_predecessor_and_not_body"] * 1.5
     
-    if relative_x0_to_common > 40 and not starts_with_number_or_bullet:
-        score_h3 += weights_base["x0_indent_penalty"] * 1.5 # Stronger penalty for H3 if deeply indented
+    if relative_x0_to_common > 35 and not starts_with_number_or_bullet:
+        score_h3 += weights_base["x0_indent_penalty"] * 2.5 
     
-    level_scores["H3"] = score_h3 - length_penalty
+    level_scores["H3"] += score_h3 - length_penalty
 
     # H4 Scoring
     score_h4 = base_prominence * weights_base["font_size_ratio_H4_boost"]
-    if block["font_size"] >= dynamic_th.get("H4", float('inf')) * 0.95:
-        score_h4 += 4.0
-    if is_bold: score_h4 += weights_base["is_bold"] * 1.0
-    if is_preceded_by_larger_gap: score_h4 += weights_base["is_preceded_by_larger_gap"] * 1.0
-    if starts_with_number_or_bullet: score_h4 += weights_base["starts_with_number_or_bullet"] * 5.0 # Very strong for H4 as list items
-    if is_short_line and num_words < 30: score_h4 += weights_base["is_short_line"] * 1.8
-    if is_form_field_label: score_h4 += weights_base["starts_with_number_or_bullet"] * 3.5
-    if is_smaller_than_predecessor_and_not_body: score_h4 += weights_base["is_smaller_than_predecessor_and_not_body"] * 0.8
+    if font_size >= dynamic_th.get("H4", float('inf')) * 0.95:
+        score_h4 += 8.0 
+    if is_bold: score_h4 += weights_base["is_bold"] * 1.5
+    if is_preceded_by_larger_gap: score_h4 += weights_base["is_preceded_by_larger_gap"] * 1.2
+    if starts_with_number_or_bullet: score_h4 += weights_base["starts_with_number_or_bullet"] * 6.0 
+    if is_short_line and num_words < 25: score_h4 += weights_base["is_short_line"] * 2.5
+    if is_smaller_than_predecessor_and_not_body: score_h4 += weights_base["is_smaller_than_predecessor_and_not_body"] * 1.5
     
-    if relative_x0_to_common > 50 and not starts_with_number_or_bullet:
-        score_h4 += weights_base["x0_indent_penalty"] * 2.0 # Very strong penalty for H4 if deeply indented
+    if relative_x0_to_common > 45 and not starts_with_number_or_bullet:
+        score_h4 += weights_base["x0_indent_penalty"] * 3.0 
 
-    level_scores["H4"] = score_h4 - length_penalty
+    level_scores["H4"] += score_h4 - length_penalty
 
-    # Determine best level based on scores and confidence thresholds
     min_confidence = {
-        "H1": 12.0, # Increased confidence thresholds
-        "H2": 9.0,
-        "H3": 7.0,
-        "H4": 5.0
+        "H1": 30.0, 
+        "H2": 25.0,
+        "H3": 20.0,
+        "H4": 15.0 
     }
 
     best_level = None
     max_score = -1.0
     
-    # Iterate from H1 down to H4 to prioritize higher levels
     for level_key in ["H1", "H2", "H3", "H4"]:
         current_score = level_scores[level_key]
         if current_score >= min_confidence.get(level_key, 0.0) and current_score > max_score:
-            max_score = current_score
             best_level = level_key
+            max_score = current_score
 
-    # Additional filtering rules to reduce false positives
-    if best_level:
-        # If it's very short, not bold, and not significantly larger font, it's probably not a heading
-        if len(block["text"].strip()) < 10 and not is_bold and block["font_size_ratio_to_common"] < 1.15:
-            if not (starts_with_number_or_bullet and num_words < 5): # Allow short numbered/bulleted items
-                return None
-        
-        # If it's a numeric-only string and not bold, likely a page number or artifact
-        if re.fullmatch(r'^\s*\d+\s*$', block["text"].strip()) and not is_bold and block["font_size_ratio_to_common"] < 1.2:
-            return None
-        
-        # If it's just a single letter or short sequence and not bold, often a list marker or noise
-        if len(block["text"].strip()) <= 3 and re.match(r'^[A-Za-z]\s*$', block["text"].strip()) and not is_bold and not starts_with_number_or_bullet:
-            return None
+    # Final filtering based on specific request:
+    # Blocks explicitly marked to be excluded from outline classification (e.g., long body text, general paragraphs)
+    if _exclude_from_outline_classification: 
+        return None 
+    
+    # Also explicitly exclude if it's a standalone date/time combo that didn't get a strong heading score
+    if is_standalone_date_time_combo and best_level is None:
+        return None
 
-        # If it's a "body-like" block (long, not bold, not large font) but got a score,
-        # it might be a false positive
-        if num_words > 20 and block["font_size_ratio_to_common"] < 1.1 and not is_bold and not starts_with_number_or_bullet and not is_all_caps:
-            return None # Likely a regular paragraph
-        
-        # If a block is identified as "is_smaller_than_predecessor_and_not_body" it needs strong cues to be a heading
-        if is_smaller_than_predecessor_and_not_body and not (is_bold or starts_with_number_or_bullet):
-            return None
-        
-        # Avoid classifying highly indented items as top-level headings if not explicitly bold/large/numbered
-        if best_level in ["H1", "H2"] and relative_x0_to_common > 50 and not (is_bold or is_centered or starts_with_number_or_bullet):
-            return None
+    # NEW: Final check for "blunders" like "WWW.TOPJUMP.COM" or "HOPE SEE HERE" (very specific patterns of unwanted text)
+    # This also handles URL patterns in the text
+    if re.match(r'^(www\.|http[s]?://|ftp://)', cleaned_text, re.IGNORECASE) or \
+       (len(cleaned_text.split()) <= 4 and re.fullmatch(r'[\w\d\.]+', cleaned_text) and not is_bold and font_size_ratio_to_common < 1.2) or \
+       (len(cleaned_text.split()) > 1 and all(len(word) <= 4 and len(word) > 0 for word in cleaned_text.split()) and not is_bold and font_size_ratio_to_common < 1.2): 
+        if best_level == "H1" and max_score > 60.0: # Only allow if extremely strong H1
+            pass
+        else:
+            return None # Otherwise, reject this pattern from being a heading
 
     return best_level
 
@@ -658,133 +869,295 @@ def smooth_heading_levels(blocks):
     """
     Applies post-classification smoothing to correct common hierarchical issues.
     Ensures a logical flow of headings (e.g., H1 -> H2 -> H3, no H1 -> H3 directly).
-    Also tries to promote lower levels if they are the first "heading-like" item on a page.
+    Also ensures every page has at least one H-n text in the outline.
     """
     if not blocks:
         return []
 
-    smoothed_blocks = []
-    # Using a list to track the last seen heading for each level on the current page
-    # Index 0 for H1, 1 for H2, etc. Value is the block itself or None.
-    page_level_stack = [None, None, None, None] 
-    last_page = -1
-
+    all_processed_and_smoothed = [] 
+    
+    max_page = max(b["page"] for b in blocks) if blocks else 0
+    
+    blocks_by_page = collections.defaultdict(list)
     for block in blocks:
-        # Reset stack if new page
-        if block["page"] != last_page:
-            page_level_stack = [None, None, None, None]
-            last_page = block["page"]
+        blocks_by_page[block["page"]].append(block)
+    
+    for page_num in blocks_by_page:
+        blocks_by_page[page_num].sort(key=itemgetter("top", "x0"))
 
-        if block.get("is_header_footer", False): # Exclude headers/footers from level smoothing
-            smoothed_blocks.append(block)
-            continue
-            
-        original_level = block.get("level")
+    # Initialize here for final smoothed list
+    final_output_blocks_before_final_pruning = [] 
+
+    for page_num in range(max_page + 1):
+        current_page_blocks = blocks_by_page[page_num]
         
-        if original_level:
-            level_num = int(original_level[1:]) - 1 # Convert to 0-indexed (H1->0, H2->1)
-            
-            # --- Promotion Logic ---
-            # If it's the first classified heading on the page, try to promote it to H1 or H2
-            # unless a very clear higher-level heading already exists.
-            is_first_non_hf_on_page = True
-            for prev_block in smoothed_blocks:
-                if prev_block["page"] == block["page"] and not prev_block.get("is_header_footer", False):
-                    is_first_non_hf_on_page = False
-                    break # Found a previous non-HF block on the same page
+        # Temp stack for current page processing within this loop (resets per page)
+        current_page_level_stack_for_smoothing = [None, None, None, None] 
+        
+        # Keep track of headings encountered on current page *before* placeholders*
+        headings_on_page_for_placeholder_check = [] 
 
-            if is_first_non_hf_on_page:
-                # If H2 or H3 is the first significant heading on a page, promote to H1 or H2
-                if level_num == 1 and block["font_size_ratio_to_common"] > 1.3: # H2 candidate
-                    block["level"] = "H1"
-                    level_num = 0
-                elif level_num == 2 and block["font_size_ratio_to_common"] > 1.2 and not block.get("is_bold", False): # H3 candidate
-                    # If H3 but not bold, if it's the first text, it might be H2
-                    block["level"] = "H2"
-                    level_num = 1
+        # Process existing blocks on the page, apply smoothing logic
+        for block in current_page_blocks:
+            if block.get("is_header_footer", False):
+                all_processed_and_smoothed.append(block) # Still add to this global list for full blocks
+                continue
             
-            # --- Demotion/Adjustment Logic ---
-            # Ensure current level is at most one deeper than its immediate parent
-            # If H1 -> H3, it should become H1 -> H2
-            if level_num > 0 and page_level_stack[level_num - 1] is None:
-                # If immediate parent (e.g., H1 for an H2) is missing, try to attach to highest available parent
-                # or promote if it's a significant jump
-                actual_parent_level_idx = -1
+            original_level = block.get("level")
+            
+            if original_level:
+                level_num = int(original_level[1:]) - 1 
+                
+                effective_parent_level_idx = -1
+                # To correctly find the parent from already processed blocks across pages:
+                # Build a temporary stack from `all_processed_and_smoothed` (global) AND current_page_level_stack_for_smoothing.
+                temp_combined_stack_blocks = []
+                # Add headings from previous pages first
+                for s_block in all_processed_and_smoothed:
+                    if s_block.get("level") is not None and s_block["page"] < block["page"]:
+                         temp_combined_stack_blocks.append(s_block)
+                # Then add headings processed so far on the current page
+                for s_block in current_page_level_stack_for_smoothing:
+                    if s_block is not None:
+                        temp_combined_stack_blocks.append(s_block)
+                
+                temp_combined_stack_blocks.sort(key=lambda x: (x["page"], x["top"])) # Sort by position for strict order
+
+                temp_hierarchy_path = [] # Build a valid path from temp_combined_stack_blocks
+                for s_block in temp_combined_stack_blocks:
+                    s_level_num_int = int(s_block["level"][1:]) - 1
+                    # Ensure strict level progression when building the temporary path
+                    while temp_hierarchy_path and (int(temp_hierarchy_path[-1]["level"][1:]) - 1 >= s_level_num_int):
+                        temp_hierarchy_path.pop()
+                    # Only add if it's a valid next level
+                    if not temp_hierarchy_path or s_level_num_int <= int(temp_hierarchy_path[-1]["level"][1:]): # Allow same level
+                        temp_hierarchy_path.append(s_block)
+
+                # Now, use temp_hierarchy_path to find parent for the current block
                 for l_idx in range(level_num - 1, -1, -1):
-                    if page_level_stack[l_idx] is not None:
-                        actual_parent_level_idx = l_idx
+                    found_parent = next((s_b for s_b in reversed(temp_hierarchy_path) if int(s_b["level"][1:]) - 1 == l_idx), None)
+                    if found_parent:
+                        effective_parent_level_idx = l_idx
                         break
                 
-                if actual_parent_level_idx != -1:
-                    # If current level is more than one step from its actual parent, promote it
-                    if level_num > actual_parent_level_idx + 1:
-                        block["level"] = f"H{actual_parent_level_idx + 2}" # +1 for 1-indexing, +1 for next level
-                        level_num = actual_parent_level_idx + 1
-                elif level_num > 0: # No higher parent found, but not H1. Demote to H1 if it looks like it, else treat as body.
-                     # This can happen if an H2 appears without any H1. Consider it H1.
-                    if block["font_size_ratio_to_common"] > 1.4 and block.get("is_bold", False) and block.get("is_short_line", False):
+                # Enforce strict hierarchy (e.g., H1 -> H3 becomes H1 -> H2)
+                if effective_parent_level_idx != -1:
+                    if level_num > effective_parent_level_idx + 1:
+                        block["level"] = f"H{effective_parent_level_idx + 2}" 
+                        level_num = effective_parent_level_idx + 1
+                elif level_num > 0: # If H2, H3, H4 but no higher parent found globally/on stack
+                    # Promote to H1 only if it's very visually prominent and first significant content on page.
+                    if block.get("is_first_on_page", False) and block.get("font_size_ratio_to_common", 0) > 1.8 and block.get("is_bold", False) and block.get("is_centered", False):
                         block["level"] = "H1"
                         level_num = 0
-                    else: # If it doesn't meet H1 criteria, it might be body text misclassified
-                        block["level"] = None # Treat as body text
-                        level_num = -1 # Mark as no heading
+                    else: # Otherwise demote it.
+                        block["level"] = None 
+                        level_num = -1 
+                
+                # Update the current_page_level_stack_for_smoothing for subsequent blocks on *this page*
+                if block.get("level") is not None: # If it's still a heading
+                    new_level_num_for_stack = int(block["level"][1:]) - 1
+                    for l_idx_clear in range(new_level_num_for_stack + 1, 4):
+                        current_page_level_stack_for_smoothing[l_idx_clear] = None
+                    current_page_level_stack_for_smoothing[new_level_num_for_stack] = block
+                    headings_on_page_for_placeholder_check.append(block) # Mark as having a heading
+            else: 
+                block["level"] = None 
 
-            # Update the stack
-            if level_num != -1: # Only update if it's a valid heading level
-                for l in range(level_num + 1, 4): # Clear deeper levels below current heading
-                    page_level_stack[l] = None
-                page_level_stack[level_num] = block
-            else: # If it was demoted to no heading, ensure its spot in stack is cleared
-                for l in range(0, 4):
-                    if page_level_stack[l] == block:
-                        page_level_stack[l] = None
+            all_processed_and_smoothed.append(block) # Add block to global list
+
+        # --- Add placeholder heading if page has no classified headings AFTER its blocks have been processed and smoothed ---
+        if not headings_on_page_for_placeholder_check:
+            meaningful_content_on_page = [b for b in current_page_blocks if not b.get("is_header_footer", False) and b.get("is_meaningful_fragment", True) and b["text"].strip()]
+            
+            placeholder_block_data = None
+            if meaningful_content_on_page:
+                meaningful_content_on_page.sort(key=itemgetter("top", "x0"))
+                for pb in meaningful_content_on_page:
+                    if pb.get("is_bold", False) and len(pb["text"].split()) < 15 and pb.get("font_size_ratio_to_common", 0) >= 0.9:
+                        placeholder_block_data = pb
                         break
+                
+                if placeholder_block_data is None: 
+                    for pb in meaningful_content_on_page:
+                        if len(pb["text"].split()) > 3 and len(pb["text"]) < 100:
+                            placeholder_block_data = pb
+                            break
+            
+            if placeholder_block_data:
+                placeholder_heading = placeholder_block_data.copy()
+                placeholder_heading["level"] = "H4" # Placeholder is usually lowest level
+                # Ensure placeholder has all necessary keys with default numerical values to prevent errors
+                placeholder_heading.setdefault("page", page_num)
+                placeholder_heading.setdefault("top", float(placeholder_block_data.get("top", 0.0))) 
+                placeholder_heading.setdefault("x0", float(placeholder_block_data.get("x0", 0.0))) 
+                placeholder_heading.setdefault("bottom", float(placeholder_block_data.get("bottom", 0.0)))
+                placeholder_heading.setdefault("width", float(placeholder_block_data.get("width", 0.0)))
+                placeholder_heading.setdefault("height", float(placeholder_block_data.get("height", 0.0)))
+                placeholder_heading.setdefault("font_size", float(placeholder_block_data.get("font_size", 12.0))) 
+                placeholder_heading.setdefault("font_name", placeholder_block_data.get("font_name", "placeholder_font"))
+                placeholder_heading.setdefault("is_bold", placeholder_block_data.get("is_bold", False)) 
+                placeholder_heading.setdefault("is_italic", placeholder_block_data.get("is_italic", False)) 
+                placeholder_heading.setdefault("line_height", float(placeholder_block_data.get("line_height", 12.0))) 
+                placeholder_heading.setdefault("lang", placeholder_block_data.get("lang", "en"))
+                placeholder_heading.setdefault("is_all_caps", False)
+                placeholder_heading.setdefault("line_length", len(placeholder_heading["text"]))
+                placeholder_heading.setdefault("num_words", len(placeholder_heading["text"].split()))
+                placeholder_heading.setdefault("starts_with_number_or_bullet", False)
+                placeholder_heading.setdefault("is_short_line", True)
+                placeholder_heading.setdefault("is_header_footer", False)
+                placeholder_heading.setdefault("is_smaller_than_predecessor_and_not_body", False)
+                placeholder_heading.setdefault("x0_normalized", 0.0)
+                placeholder_heading.setdefault("relative_x0_to_common", 0.0)
+                placeholder_heading.setdefault("is_meaningful_fragment", True)
+                placeholder_heading.setdefault("_exclude_from_outline_classification", False)
+                placeholder_heading.setdefault("is_body_paragraph_candidate", False)
+                placeholder_heading.setdefault("is_standalone_date_time_combo", False)
 
-        smoothed_blocks.append(block)
+                # Truncate placeholder text if needed
+                placeholder_heading_text_cleaned = placeholder_heading['text'][:70].replace(':', '').strip()
+                placeholder_heading["text"] = f"Page {page_num+1} Section: {placeholder_heading_text_cleaned}..." if len(placeholder_heading_text_cleaned) > 50 else f"Page {page_num+1} Section: {placeholder_heading_text_cleaned}"
+                
+                is_duplicate_text_in_outline = False
+                for existing_block in all_processed_and_smoothed:
+                    if existing_block.get("level") and existing_block["text"].lower() == placeholder_heading["text"].lower():
+                       is_duplicate_text_in_outline = True
+                       break
 
-    # Final pass to remove any blocks that might have been effectively demoted to None
-    return [b for b in smoothed_blocks if b.get("level") is not None and b["text"].strip()]
+                if not is_duplicate_text_in_outline:
+                    all_processed_and_smoothed.append(placeholder_heading)
+            else: 
+                generic_placeholder = {
+                    "level": "H4",
+                    "text": f"Page {page_num+1} - No Obvious Section",
+                    "page": page_num,
+                    "top": 0.0, "x0": 0.0, "bottom": 0.0, "width": 0.0, "height": 0.0, 
+                    "font_size": 12.0, "font_name": "placeholder_font",
+                    "is_bold": False, "is_italic": False, "line_height": 12.0, "lang": "en",
+                    "is_all_caps": False, "line_length": len(f"Page {page_num+1} - No Obvious Section"),
+                    "num_words": len(f"Page {page_num+1} - No Obvious Section".split()),
+                    "starts_with_number_or_bullet": False, "is_short_line": True,
+                    "is_header_footer": False, "is_smaller_than_predecessor_and_not_body": False,
+                    "x0_normalized": 0.0, "relative_x0_to_common": 0.0,
+                    "is_meaningful_fragment": True, "_exclude_from_outline_classification": False,
+                    "is_body_paragraph_candidate": False,
+                    "is_standalone_date_time_combo": False 
+                }
+                all_processed_and_smoothed.append(generic_placeholder)
+                    
+    # Final sort and re-hierarchy enforcement across ALL blocks after insertions
+    # This pass is critical to fix the levels after placeholders are inserted.
+    final_sorted_blocks = sorted(all_processed_and_smoothed, key=lambda b: (b["page"], b["top"], b["x0"]))
+    
+    # Initialize re_re_smoothed_final_blocks here, at the top level of this scope
+    re_re_smoothed_final_blocks = [] 
+    re_re_page_level_stack = [None, None, None, None] 
+
+    for block in final_sorted_blocks:
+        if block.get("level") is not None: 
+            level_num = int(block["level"][1:]) - 1
+            
+            re_re_effective_parent_level_idx = -1
+            temp_stack_for_re_re = [] 
+            for s_block in re_re_smoothed_final_blocks:
+                if s_block.get("level") is not None and s_block["page"] <= block["page"]:
+                    s_level_num_int = int(s_block["level"][1:]) - 1
+                    while temp_stack_for_re_re and int(temp_stack_for_re_re[-1]["level"][1:]) - 1 >= s_level_num_int:
+                        temp_stack_for_re_re.pop()
+                    temp_stack_for_re_re.append(s_block)
+
+            for l_idx in range(level_num - 1, -1, -1):
+                found_parent = next((s_b for s_b in reversed(temp_stack_for_re_re) if int(s_b["level"][1:]) - 1 == l_idx), None)
+                if found_parent:
+                    re_re_effective_parent_level_idx = l_idx
+                    break
+            
+            if re_re_effective_parent_level_idx != -1:
+                if level_num > re_re_effective_parent_level_idx + 1:
+                    block["level"] = f"H{re_re_effective_parent_level_idx + 2}"
+                    level_num = re_re_effective_parent_level_idx + 1
+            elif level_num > 0: 
+                if block.get("font_size_ratio_to_common", 0) > 1.8 and block.get("is_bold", False) and block.get("is_centered", False):
+                    block["level"] = "H1"
+                    level_num = 0
+                else: 
+                    block["level"] = None 
+                    level_num = -1
+            
+            if level_num != -1:
+                for l in range(level_num + 1, 4):
+                    re_re_page_level_stack[l] = None
+                re_re_page_level_stack[level_num] = block
+            else: 
+                for l in range(0, 4):
+                    if re_re_page_level_stack[l] == block:
+                        re_re_page_level_stack[l] = None
+                        break
+        
+        re_re_smoothed_final_blocks.append(block)
+
+    final_outline_candidates = []
+    for block in re_re_smoothed_final_blocks:
+        if block.get("is_header_footer", False):
+            continue
+        if block.get("is_standalone_date_time_combo", False) and block.get("level") is None:
+            continue 
+
+        if block.get("level") is not None: 
+            final_outline_candidates.append(block)
+
+    return final_outline_candidates
 
 
-def run(blocks, page_dimensions, most_common_font_size=None):
+def run_with_custom_logic(raw_extracted_blocks, page_dimensions, detected_lang="und", nlp_model_for_quality_checks=None):
     """
-    Classifies text blocks into heading levels H1-H4 using dynamic thresholds
-    and contextual features.
-    Accepts blocks and page_dimensions directly (in-memory processing).
-    Returns the classified blocks.
+    Main function to run the custom classification logic:
+    1. Calculate initial features (including spatial) on raw blocks.
+    2. Analyze line changes and perform merges based on dynamic thresholds.
+    3. Apply strict pruning rules (hard prune for noise, soft prune for outline exclusion).
+    4. Classify headings.
+    5. Smooth hierarchy and ensure every page is covered.
     """
-    if not blocks:
+    if not raw_extracted_blocks:
         print("No blocks to classify.")
         return []
 
-    # Sort blocks by page, then top, then x0, which is crucial for feature calculation
-    blocks.sort(key=itemgetter("page", "top", "x0"))
+    print("      Sub-stage 3.1: Calculating initial block features..")
+    blocks_with_initial_features, most_common_font_size_from_raw = calculate_all_features(raw_extracted_blocks, page_dimensions, detected_lang=detected_lang)
 
-    blocks_with_features, calculated_common_font_size = calculate_all_features(blocks, page_dimensions)
-    if most_common_font_size is None: # Use calculated if not explicitly provided
-        most_common_font_size = calculated_common_font_size
+    print("      Sub-stage 3.2: Analyzing line changes and intelligent merging..")
+    logical_blocks_with_merge_info = analyze_line_changes_and_merge(blocks_with_initial_features) 
 
+    print("      Sub-stage 3.3: Applying strict pruning rules for outline vs. summary..")
+    pruned_and_filtered_blocks = filter_blocks_for_classification(
+        logical_blocks_with_merge_info, nlp_model_for_quality_checks, detected_lang
+    )
+
+    recalculated_all_font_sizes = [b["font_size"] for b in pruned_and_filtered_blocks if b["font_size"] is not None and b["font_size"] > 0]
+    if not recalculated_all_font_sizes:
+        recalculated_most_common_font_size = most_common_font_size_from_raw 
+    else:
+        try:
+            recalculated_most_common_font_size = statistics.median(recalculated_all_font_sizes)
+        except statistics.StatisticsError:
+            recalculated_most_common_font_size = recalculated_all_font_sizes[0]
+        if recalculated_most_common_font_size == 0:
+            recalculated_most_common_font_size = most_common_font_size_from_raw
 
     dynamic_thresholds_map = dynamic_thresholds(
-        [b["font_size"] for b in blocks_with_features if b["font_size"] is not None], most_common_font_size
+        recalculated_all_font_sizes, recalculated_most_common_font_size
     )
-    print(f"Dynamically determined heading thresholds: {dynamic_thresholds_map}")
+    print(f"      Sub-stage 3.4: Dynamically determined heading thresholds: {dynamic_thresholds_map}") 
 
+
+    print("      Sub-stage 3.5: Classifying blocks into headings..")
     classified_blocks_output = []
-    for block in blocks_with_features:
-        # ML model part is removed for a purely heuristic approach as per request for maximum precision
-        # if heading_classifier_model:
-        #     pass
-        
-        level = classify_block_heuristic(block, dynamic_thresholds_map, most_common_font_size)
-
-        if level:
-            block["level"] = level
-        else:
-            block["level"] = None # Explicitly set to None if not classified as a heading
+    for block in pruned_and_filtered_blocks: 
+        level = classify_block_hybrid_score(block, dynamic_thresholds_map, recalculated_most_common_font_size) 
+        block["level"] = level 
         classified_blocks_output.append(block)
 
-    # Apply smoothing to ensure hierarchical consistency
+    print("      Sub-stage 3.6: Smoothing heading hierarchy and ensuring page coverage..")
     final_classified_blocks = smooth_heading_levels(classified_blocks_output)
 
     return final_classified_blocks

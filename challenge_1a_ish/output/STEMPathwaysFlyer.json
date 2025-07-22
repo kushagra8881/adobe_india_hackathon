@@ -1,35 +1,49 @@
 {
-  "title": "Parsippany -Troy Hills STEM Pathways",
+  "title": "STEMPathwaysFlyer",
+  "summary": "When asked the question, “Would participation in the Drew University: STEM Pathways set PTHSD students apart when applying challenging themselves in the classroom.” colleges responded with the following: NJIT: student is interested in STEM programs, and would be a SUNY Binghamton: strong candidate for our programs.” and students with a strong STEM curriculum that includes research or lab work are generally more competitive in our Ithaca College: applicant pool and more success as students at in classes and activities that enhance their knowledge and Binghamton because of their early HS experience.”",
   "outline": [
     {
-      "level": "H3",
-      "text": "REGULAR PATHWAY",
-      "page": 1
-    },
-    {
-      "level": "H3",
-      "text": "DISTINCTION PATHWAY",
-      "page": 1
-    },
-    {
-      "level": "H3",
-      "text": "Goals:",
-      "page": 1
-    },
-    {
-      "level": "H3",
-      "text": "PATHWAY OPTIONS",
-      "page": 1
-    },
-    {
-      "level": "H2",
-      "text": "Elective Course Offerings",
-      "page": 2
-    },
-    {
-      "level": "H3",
-      "text": "What Colleges Say!",
-      "page": 2
+      "level": 1,
+      "text": "(CCNA cert)",
+      "page": 1,
+      "children": [
+        {
+          "level": 2,
+          "text": "Seminar and",
+          "page": 1,
+          "children": [],
+          "_id": 2538470498112
+        },
+        {
+          "level": 2,
+          "text": "Cybersecurity (CCNA",
+          "page": 1,
+          "children": [],
+          "_id": 2538470506176
+        },
+        {
+          "level": 2,
+          "text": "Research w/",
+          "page": 1,
+          "children": [],
+          "_id": 2538470504896
+        },
+        {
+          "level": 2,
+          "text": "cert)",
+          "page": 1,
+          "children": [],
+          "_id": 2538470495168
+        },
+        {
+          "level": 2,
+          "text": "advisor  approval",
+          "page": 1,
+          "children": [],
+          "_id": 2538470494912
+        }
+      ],
+      "_id": 2538470496832
     }
   ]
 }

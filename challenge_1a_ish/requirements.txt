@@ -1,5 +1,23 @@
-pdfminer.six==20221105
-spacy==3.7.2
-scikit-learn==1.4.2
-pandas==2.2.2
-joblib==1.4.0
+PyMuPDF==1.24.1
+spacy==3.7.4
+spacy-langdetect
+scikit-learn
+pandas
+joblib
+numpy
+langdetect
+tqdm==4.66.2
+spacy==3.7.4
+tqdm==4.66.2
+# After installing the above, download the spaCy models:
+# python -m spacy download xx_ent_wiki_sm
+# python -m spacy download en_core_web_sm
+# (You may need to download other language models as needed if you expect non-English documents frequently)
+# No longer strictly needed for this version (removed ML components)
+# Manual SpaCy Model Download for Offline Use:
+# VERY IMPORTANT: Before running the application in an offline environment,
+# you MUST manually download the required spaCy model(s).
+# For this version, 'xx_ent_wiki_sm' is the recommended universal model:
+# python -m spacy download xx_ent_wiki_sm
+# If you decide to include 'en_core_web_sm' for slightly better English summarization (and accept higher model size):
+# python -m spacy download en_core_web_sm
