@@ -26,8 +26,11 @@ COPY requirements.txt ./
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt
-RUN python -m spacy download en_core_web_sm
-RUN python -m spacy download xx_ent_wiki_sm
+
+# Copy model wheel files and install them directly
+COPY models/*.whl /app/models/
+RUN pip install --no-cache-dir /app/models/xx_ent_wiki_sm*.whl
+RUN pip install --no-cache-dir /app/models/en_core_web_sm*.whl
 
 COPY main.py /app/
 COPY pdf_utils/ /app/pdf_utils/

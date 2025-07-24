@@ -2,9 +2,74 @@ import json
 import os
 import collections
 import re
-import fitz # PyMuPDF
-from operator import itemgetter
+from operator import itemgetter # Ensure itemgetter is imported here
 import numpy as np
+import fitz # PyMuPDF
+
+
+# NEW: Helper for pre-merging very tight horizontal fragments
+def _pre_merge_horizontal_fragments(blocks):
+    """
+    Performs an aggressive, early merge of blocks that are extremely close horizontally
+    and have overlapping vertical bounds, suggesting they are fragments of the same logical span.
+    This fixes issues like "RFP: R RFP: Re" by stitching split words/phrases.
+    """
+    if not blocks:
+        return []
+
+    blocks.sort(key=itemgetter("top", "x0")) # Ensure sorted for contiguous processing
+
+    merged_output = []
+    i = 0
+    while i < len(blocks):
+        current = blocks[i]
+        temp_merged = current.copy()
+        
+        # Ensure x1 is present and numerical
+        temp_merged.setdefault("x1", temp_merged["x0"] + temp_merged.get("width", 0.0))
+        temp_merged["x1"] = float(temp_merged["x1"]) # Ensure float
+
+        j = i + 1
+        while j < len(blocks):
+            next_block = blocks[j]
+            
+            # Ensure next_block has numerical coords
+            next_block.setdefault("x0", 0.0)
+            next_block.setdefault("x1", next_block["x0"] + next_block.get("width", 0.0))
+            next_block.setdefault("top", 0.0)
+            next_block.setdefault("bottom", next_block["top"] + next_block.get("height", 0.0))
+
+            if next_block["page"] != temp_merged["page"]:
+                break
+            
+            horizontal_gap = next_block["x0"] - temp_merged["x1"]
+            vertical_overlap = min(temp_merged["bottom"], next_block["bottom"]) - max(temp_merged["top"], next_block["top"])
+            
+            # Conditions for aggressive horizontal merge: very small horizontal gap (can be negative for overlap),
+            # significant vertical overlap (meaning they are on the same effective line), and very similar fonts.
+            if horizontal_gap < 5 and horizontal_gap > -5 and \
+               vertical_overlap > min(temp_merged.get("height", 0.0), next_block.get("height", 0.0)) * 0.8 and \
+               abs(next_block.get("font_size", 0.0) - temp_merged.get("font_size", 0.0)) < 0.2 and \
+               next_block.get("font_name", "").split('+')[-1] == temp_merged.get("font_name", "").split('+')[-1]:
+                
+                temp_merged["text"] += next_block["text"]
+                temp_merged["x1"] = next_block["x1"] 
+                temp_merged["width"] = temp_merged["x1"] - temp_merged["x0"]
+                temp_merged["bottom"] = max(temp_merged["bottom"], next_block["bottom"])
+                temp_merged["height"] = temp_merged["bottom"] - temp_merged["top"]
+                temp_merged["is_bold"] = temp_merged.get("is_bold", False) or next_block.get("is_bold", False)
+                temp_merged["is_italic"] = temp_merged.get("is_italic", False) or next_block.get("is_italic", False)
+                temp_merged["font_size"] = max(temp_merged.get("font_size", 0.0), next_block.get("font_size", 0.0)) 
+                
+                j += 1
+            else:
+                break
+        
+        merged_output.append(temp_merged)
+        i = j
+
+    return merged_output
+
 
 def detect_columns(blocks_on_page, page_width, x_tolerance=10.0, min_column_width_ratio=0.05):
     """
@@ -67,10 +132,9 @@ def detect_columns(blocks_on_page, page_width, x_tolerance=10.0, min_column_widt
 
 def merge_nearby_blocks_simple(blocks_in_column, y_tolerance_factor=0.6, x_tolerance=10.0):
     """
-    Performs a very basic post-extraction merge of blocks that are extremely close,
-    horizontally aligned, and share similar font properties. This is intended for
-    fixing very fragmented PDF output (e.g., single words split into multiple spans).
-    The main logical merging will happen in classify_headings.
+    Performs a basic post-extraction merge of blocks that are vertically very close,
+    horizontally aligned, and share similar font properties, likely representing 
+    single logical lines or phrases split by PDF rendering.
     """
     if not blocks_in_column:
         return []
@@ -99,21 +163,17 @@ def merge_nearby_blocks_simple(blocks_in_column, y_tolerance_factor=0.6, x_toler
 
             avg_line_height_current = merged_current.get("line_height", merged_current["height"])
             vertical_gap = next_block["top"] - merged_current["bottom"]
-            # Only merge if extremely close vertically and horizontally aligned, and similar font
-            is_very_close_vertically = abs(vertical_gap) < (avg_line_height_current * y_tolerance_factor * 0.5) and vertical_gap >= -2.0 # Tighter
+            is_very_close_vertically = abs(vertical_gap) < (avg_line_height_current * y_tolerance_factor) and vertical_gap >= -5.0 
             is_aligned_horizontally = abs(next_block["x0"] - merged_current["x0"]) < x_tolerance
             is_similar_font_size = abs(next_block["font_size"] - merged_current["font_size"]) < 0.5
             font_name_current_base = merged_current["font_name"].split('+')[-1] if merged_current["font_name"] else ""
             font_name_next_base = next_block["font_name"].split('+')[-1] if next_block["font_name"] else ""
             is_similar_font_name = font_name_next_base == font_name_current_base
 
-            # Only merge if it's a very clear continuation (e.g., hyphenated words, fragmented spans of a single line)
             should_merge = False
             if is_very_close_vertically and is_aligned_horizontally and is_similar_font_size and is_similar_font_name:
-                # Prioritize merging hyphenated words or very short fragments that clearly belong together
                 if merged_current["text"].strip().endswith('-') or \
-                   (len(merged_current["text"].strip().split()) < 3 and len(next_block["text"].strip().split()) < 3 and 
-                    not re.search(r'[.?!]$', merged_current["text"].strip())):
+                   (not re.search(r'[.?!]$', merged_current["text"].strip()) and len(next_block["text"].strip().split()) > 0 and next_block["text"].strip()[0].islower()):
                     should_merge = True
                 
             if should_merge:
@@ -121,7 +181,7 @@ def merge_nearby_blocks_simple(blocks_in_column, y_tolerance_factor=0.6, x_toler
                 if merged_text.strip().endswith('-'):
                     merged_text = merged_text.strip()[:-1] 
                 else:
-                    merged_text += " " # Add space if not hyphenated
+                    merged_text += " " 
 
                 merged_current["text"] = (merged_text + next_block["text"]).strip()
                 merged_current["bottom"] = next_block["bottom"]
@@ -129,7 +189,7 @@ def merge_nearby_blocks_simple(blocks_in_column, y_tolerance_factor=0.6, x_toler
                 merged_current["x0"] = min(merged_current["x0"], next_block["x0"]) 
                 merged_current["x1"] = max(merged_current.get("x1", merged_current["x0"] + merged_current["width"]), next_block.get("x1", next_block["x0"] + next_block["width"]))
                 merged_current["width"] = merged_current["x1"] - merged_current["x0"]
-                merged_current["font_size"] = max(merged_current["font_size"], next_block["font_size"]) # Keep largest font size
+                merged_current["font_size"] = max(merged_current["font_size"], next_block["font_size"]) 
                 merged_current["is_bold"] = merged_current.get("is_bold", False) or next_block.get("is_bold", False)
                 merged_current["is_italic"] = merged_current.get("is_italic", False) or next_block.get("is_italic", False)
                 merged_current["line_height"] = max(merged_current.get("line_height", 0), next_block.get("line_height", 0), merged_current["height"])
@@ -264,12 +324,15 @@ def extract_text_blocks_pymu(pdf_path):
         
         page_spans_raw.sort(key=itemgetter("top", "x0"))
 
-        columns = detect_columns(page_spans_raw, page_width)
+        # NEW: Apply aggressive horizontal fragment pre-merging here
+        page_spans_pre_merged = _pre_merge_horizontal_fragments(page_spans_raw)
+
+        columns = detect_columns(page_spans_pre_merged, page_width) # Use pre_merged blocks for column detect
         
         blocks_in_columns = collections.defaultdict(list)
         unassigned_blocks = [] 
 
-        for block in page_spans_raw:
+        for block in page_spans_pre_merged: # Use pre_merged blocks for column assignment
             assigned_to_column = False
             for col_idx, (col_x_min, col_x_max) in enumerate(columns):
                 block_center_x = block["x0"] + block["width"] / 2
@@ -300,7 +363,7 @@ def extract_text_blocks_pymu(pdf_path):
     # Apply header/footer detection to the initial set of blocks
     final_blocks_with_hf_marked = detect_and_mark_headers_footers(all_raw_spans_with_metadata, page_dimensions)
 
-    final_blocks_with_hf_marked.sort(key=lambda b: (b["page"], b["top"], b["x0"]))
+    final_blocks_with_hf_marked.sort(key=itemgetter("page", "top", "x0")) # Use itemgetter directly
 
     return final_blocks_with_hf_marked, page_dimensions
 

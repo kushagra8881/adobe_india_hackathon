@@ -4,261 +4,285 @@ import re
 import collections
 from operator import itemgetter
 
-def derive_title_from_summary_and_outline(summary_text, outline_root_node_children, pdf_filename_base, nlp_model=None):
+# Removed check_meaningful_fragment from this file as it's part of classify_headings
+# and we're passing nlp_model directly to title derivation now.
+
+def derive_title_from_sampled_text_and_filename(sampled_raw_blocks, pdf_filename_base, nlp_model=None):
     """
-    Derives a meaningful document title from the summary text,
-    giving weight to its relevance to actual outline headings and the original filename.
-    The title must be whole and meaningful, shorter than 7 words, and not just repetitions or points.
+    Derives a meaningful document title based on text from early pages (with font size priority)
+    and relatability to the PDF filename.
+    The title must be short (shorter than 7 words) and meaningfully complete.
+    Does NOT use summary text directly for title.
     """
     cleaned_filename_base = re.sub(r'[\s_-]+', ' ', pdf_filename_base).strip().lower()
 
-    if not summary_text or not nlp_model:
-        return re.sub(r'[\s_-]+', ' ', pdf_filename_base).strip() # Fallback to filename if no summary or NLP
+    if not sampled_raw_blocks or not nlp_model:
+        return re.sub(r'[\s_-]+', ' ', pdf_filename_base).strip() # Fallback to filename
 
-    doc_sents = list(nlp_model(summary_text).sents)
-    
-    outline_heading_texts = []
-    for node in outline_root_node_children:
-        if node.get("level") == 1:
-            outline_heading_texts.append(node["text"].strip())
-        for child in node.get("children", []):
-            if child.get("level") == 2:
-                outline_heading_texts.append(child["text"].strip())
+    # Calculate common font size from sampled blocks for title scoring
+    all_sampled_font_sizes = [b.get("font_size", 0.0) for b in sampled_raw_blocks if b.get("font_size") > 0]
+    if not all_sampled_font_sizes:
+        most_common_sampled_font_size = 12.0
+    else:
+        try:
+            most_common_sampled_font_size = statistics.median(all_sampled_font_sizes)
+        except statistics.StatisticsError:
+            most_common_sampled_font_size = all_sampled_font_sizes[0]
+        if most_common_sampled_font_size == 0:
+            most_common_sampled_font_size = 12.0
 
     title_candidates = []
-
-    for sent_idx, sent in enumerate(doc_sents):
-        sent_text = sent.text.strip()
+    
+    for block_idx, block in enumerate(sampled_raw_blocks):
+        sent_text = block["text"].strip()
         num_words_sent = len(sent_text.split())
 
         if not sent_text:
             continue
-
-        # Filter out sentences that are too long for the title (new constraint: < 7 words)
-        if num_words_sent >= 7:
+        
+        # 1. Title must be short: shorter than 7 words.
+        if num_words_sent >= 7 or num_words_sent < 2: # Min 2 words for a meaningful title
             continue
         
-        # Filter out very short, non-descriptive sentences, or those that are clearly just noise/URLs/repetitive
-        if num_words_sent < 2 or len(sent_text) < 10 or re.fullmatch(r'[\d\W_]+', sent_text) or \
-           re.match(r'^(www\.|http[s]?://|ftp://)', sent_text, re.IGNORECASE) or \
+        # 2. Meaningful and complete (NLP based check, filter repetitive/gibberish)
+        doc_sent = nlp_model(sent_text)
+        is_cjk = nlp_model.lang_ in ["zh", "ja", "ko"] # Check if NLP model is CJK for language-specific sentence rules
+
+        # Basic sentence structure check for non-CJK
+        if not is_cjk:
+            if not list(doc_sent.sents) or len(list(doc_sent.sents)[0].text.strip().split()) < num_words_sent * 0.8: # Fragmented sentence structure
+                continue # Prune fragmented sentences
+        
+        # Filter patterns that are definitely NOT titles (URLs, common headers/footers, very short non-descriptive, repetitions)
+        if re.match(r'^(www\.|http[s]?://|ftp://)', sent_text, re.IGNORECASE) or \
+           re.fullmatch(r'[\d\W_]+', sent_text) or \
+           re.match(r'^\s*(Page|Table|Figure)\s+\d+(\.\d+)?', sent_text, re.IGNORECASE) or \
+           re.match(r'^\s*([A-Z]\.?){2,}', sent_text) or \
            (num_words_sent > 1 and all(len(word) <= 4 for word in sent_text.split()) and not re.match(r'^[A-Z][A-Z\s]+$', sent_text)): # "HOPE SEE HERE" type blunder
             continue
+        
+        # If the text is very repetitive (e.g., "RFP RFP RFP")
+        if re.search(r'(\b\w+\b\s*){2,}\1', sent_text, re.IGNORECASE): # Detect repeated words/phrases
+             continue
 
-        # Filter out sentences that look like dates, page numbers, or simple list markers (common noise)
-        if re.fullmatch(r'^\s*((\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})|(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})|((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s*\d{4})|(\d{4})|(\d+\.?)|([A-Z]\.?){2,})\s*$', sent_text, re.IGNORECASE):
+        # Check for unclosed parentheses/brackets (strong indicator of fragmentation)
+        stack = []
+        mapping = {")": "(", "]": "[", "}": "{"}
+        unclosed = False
+        for char in sent_text:
+            if char in mapping.values():
+                stack.append(char)
+            elif char in mapping:
+                if not stack or stack.pop() != mapping[char]:
+                    unclosed = True; break
+        if len(stack) > 0 or unclosed: # Unclosed or mismatched
             continue
         
         score = 0
         
-        # Boost for appearing early in the summary
-        if sent_idx == 0: 
-            score += 10
-        elif sent_idx == 1: 
+        # Font size weight: larger fonts get more score
+        font_size = block.get("font_size", most_common_sampled_font_size)
+        font_size_ratio = font_size / most_common_sampled_font_size
+        score += font_size_ratio * 10 # Strong weight for font size
+
+        if block.get("is_bold", False):
             score += 5
-            
-        # Semantic/Keyword similarity with outline headings
-        if nlp_model and outline_heading_texts:
-            sent_doc_lower = nlp_model(sent_text.lower())
-            sent_lemmas = {token.lemma_ for token in sent_doc_lower if token.is_alpha and not token.is_stop}
-            
-            heading_overlap_score = 0
-            for heading_text in outline_heading_texts:
-                heading_doc_lower = nlp_model(heading_text.lower())
-                heading_lemmas = {token.lemma_ for token in heading_doc_lower if token.is_alpha and not token.is_stop}
-                
-                common_lemmas_count = len(sent_lemmas.intersection(heading_lemmas))
-                if common_lemmas_count > 0:
-                    heading_overlap_score += common_lemmas_count / len(sent_lemmas) if len(sent_lemmas) > 0 else 0
-            
-            score += heading_overlap_score * 8 
-            
-            if heading_overlap_score == 0 and len(sent_lemmas) > 5:
-                score -= 8 
         
-        # Clause to check doc name as well and give more weightage
+        # Position weight: earlier blocks get more score (scaled by index)
+        # Assuming sampled_raw_blocks is ordered
+        position_score = (len(sampled_raw_blocks) - block_idx) / len(sampled_raw_blocks)
+        score += position_score * 5 
+
+        # Relatability score with PDF filename
         if cleaned_filename_base and nlp_model:
+            sent_doc = nlp_model(sent_text.lower())
             filename_doc = nlp_model(cleaned_filename_base)
-            filename_lemmas = {token.lemma_ for token in filename_doc if token.is_alpha and not token.is_stop}
             
-            if filename_lemmas:
-                filename_overlap_count = len(sent_lemmas.intersection(filename_lemmas))
-                if filename_overlap_count > 0:
-                    score += filename_overlap_count * 5 
+            # Using spaCy's vector similarity if available, else keyword overlap
+            if sent_doc.has_vector and filename_doc.has_vector:
+                similarity = sent_doc.similarity(filename_doc)
+                score += similarity * 10 # Strong boost for semantic similarity
+            else: # Fallback to keyword overlap if vectors not available (e.g., xx_ent_wiki_sm might not have vectors)
+                sent_lemmas = {token.lemma_ for token in sent_doc if token.is_alpha and not token.is_stop}
+                filename_lemmas = {token.lemma_ for token in filename_doc if token.is_alpha and not token.is_stop}
+                if sent_lemmas and filename_lemmas:
+                    overlap = len(sent_lemmas.intersection(filename_lemmas)) / min(len(sent_lemmas), len(filename_lemmas))
+                    score += overlap * 5
+        
+        title_candidates.append({"text": sent_text, "score": score, "font_size": font_size})
 
-
-        title_candidates.append({"text": sent_text, "score": score})
-
-    best_candidate = None
+    best_title_candidate = None
     if title_candidates:
-        best_candidate = max(title_candidates, key=itemgetter("score"))
-    
-    final_title = ""
-    # Ensure a minimum score for a summary sentence to be considered a title, AND meet length constraint
-    if best_candidate and best_candidate["score"] > 5 and len(best_candidate["text"].split()) < 7: 
-        final_title = best_candidate["text"]
-    else: # Fallback to cleaned filename if no good summary candidate
-        final_title = re.sub(r'[\s_-]+', ' ', pdf_filename_base).strip()
+        # Prioritize by score, then by font size (larger font if scores are equal)
+        title_candidates.sort(key=lambda x: (x["score"], x["font_size"]), reverse=True)
+        best_title_candidate = title_candidates[0]
 
-    # Final cleaning: remove common prefixes, excessive spaces
-    final_title = re.sub(r'^(the\s*|an\s*|a\s*|this\s*document\s*|this\s*report\s*|summary\s*of\s*|overview\s*of\s*|request\s*for\s*proposal\s*)\s*', '', final_title, flags=re.IGNORECASE).strip()
+    final_title = ""
+    if best_title_candidate and best_title_candidate["score"] > 3: # Minimum score to consider a candidate
+        final_title = best_title_candidate["text"]
+    else:
+        final_title = re.sub(r'[\s_-]+', ' ', pdf_filename_base).strip() # Fallback to cleaned filename
+
+
+    # Final cleaning of the determined title
+    final_title = re.sub(r'^(the\s*|an\s*|a\s*|this\s*document\s*|this\s*report\s*|overview\s*of\s*|request\s*for\s*proposal\s*)\s*', '', final_title, flags=re.IGNORECASE).strip()
     final_title = re.sub(r'[\u201c\u201d"\'`]', '', final_title).strip()
     final_title = re.sub(r'\s+', ' ', final_title).strip()
     
-    # If after all derivation and cleaning, the title is still too short or looks like a fragment/generic, revert to filename
-    # Re-check length after cleaning
-    if len(final_title.split()) < 3 or len(final_title) < 20 or re.fullmatch(r'[\s\d\W_]+', final_title) or len(final_title.split()) >= 7: # Re-enforce < 7 words
+    # Final check for quality: if it's too short or looks like a generic fragment after all processing
+    if len(final_title.split()) < 3 or len(final_title) < 20 or re.fullmatch(r'[\s\d\W_]+', final_title) or len(final_title.split()) >= 7: 
         final_title = re.sub(r'[\s_-]+', ' ', pdf_filename_base).strip()
 
     return final_title
 
 
-def _count_headings_in_outline(outline_nodes):
-    """Recursively counts total headings in a structured outline."""
-    count = 0
-    for node in outline_nodes:
-        count += 1
-        count += _count_headings_in_outline(node.get("children", []))
-    return count
-
-def _prune_outline_by_length_constraint(outline_nodes, max_headings_allowed):
+def _prune_outline_for_length_and_page_coverage(flat_headings, num_pages_total):
     """
-    Intelligently prunes the outline to meet a maximum heading count constraint.
-    Prioritizes higher-level headings and more prominent ones.
+    Prunes the flattened list of headings to meet length constraints and ensure page coverage.
+    Removes H4s first, then H3s, etc. Keeps at least 1-2 headings per page.
+    The flat_headings are assumed to be sorted by page, then level, then text for initial passes.
     """
-    flat_headings = []
+    if not flat_headings:
+        return []
+
+    # Map page number to list of headings on that page
+    headings_by_page = collections.defaultdict(list)
+    for heading in flat_headings:
+        headings_by_page[heading["page"]].append(heading) # Page numbers are already 0-indexed here
+
+    # Determine the target number of headings based on 1-2 per page and max 3*pages
+    target_max_total_headings = int(num_pages_total * 3) # Max allowed total headings
     
-    # Convert to a flat list with full path and score for pruning decisions
-    def flatten_and_score(nodes, current_path=[]):
-        for node in nodes:
-            # Score: higher level = more important, earlier in document = more important
-            # Add weight for font size, boldness if original block data were passed
-            score = (5 - node["level"]) * 1000 + (1000 - node["page"]) # Level has higher weight
-            
-            flat_headings.append({
-                "node": node,
-                "score": score,
-                "path_levels": [p.get("level",0) for p in current_path] + [node["level"]]
-            })
-            flatten_and_score(node.get("children", []), current_path + [node])
-
-    flatten_and_score(outline_nodes)
+    # Pass 1: Ensure minimum headings per page (1 to 2) and initially collect all unique headings
     
-    if len(flat_headings) <= max_headings_allowed:
-        return outline_nodes # No pruning needed
+    # Use a set to track which headings (by their content) are already selected
+    selected_heading_texts = set() 
+    initial_selection_for_coverage = []
 
-    # Sort by score (most important first)
-    flat_headings.sort(key=lambda x: x["score"], reverse=True)
-
-    # Select top N headings.
-    # To maintain hierarchy, we must ensure parents are kept if their children are selected.
-    selected_nodes_ids = set() # Use IDs to keep track of selected nodes
-
-    # First pass: select the top `max_headings_allowed` nodes and all their ancestors
-    initial_selection = flat_headings[:max_headings_allowed]
-    
-    # Create a map from original node object (by its ID) to its path for easy ancestor finding
-    all_nodes_map = {}
-    def build_node_map(nodes, current_path=[]):
-        for node in nodes:
-            # Assign a unique ID if not already present (from classify_headings smoothing)
-            if "_id" not in node:
-                node["_id"] = id(node) 
-            all_nodes_map[node["_id"]] = {"node": node, "path": current_path}
-            build_node_map(node.get("children", []), current_path + [node])
-    
-    build_node_map(outline_nodes)
-
-    for item in initial_selection:
-        current_node_id = item["node"]["_id"]
-        selected_nodes_ids.add(current_node_id)
+    for page_num_0_indexed in range(num_pages_total): # Iterate through 0-indexed page numbers
+        page_headings = sorted(headings_by_page.get(page_num_0_indexed, []), key=lambda x: (int(x["level"][1:]), x["text"])) # Sort by level then text
         
-        # Add all ancestors of the current node to selected_nodes_ids
-        for ancestor_node in all_nodes_map[current_node_id]["path"]:
-            selected_nodes_ids.add(ancestor_node["_id"])
+        kept_on_page_count = 0
+        
+        # Prioritize keeping higher-level headings (H1-H3) for minimum coverage
+        for heading in page_headings:
+            if kept_on_page_count < 1: # Ensure at least 1 heading per page
+                # Add to selection if not already added (e.g., from an earlier page's selection)
+                if heading["text"] not in selected_heading_texts:
+                    initial_selection_for_coverage.append(heading)
+                    selected_heading_texts.add(heading["text"])
+                    kept_on_page_count += 1
+            # Add a second heading if possible, favoring H1-H3 or most prominent H4
+            elif kept_on_page_count < 2 and int(heading["level"][1:]) <= 3: # Try to get up to 2, prioritize H1-H3
+                if heading["text"] not in selected_heading_texts:
+                    initial_selection_for_coverage.append(heading)
+                    selected_heading_texts.add(heading["text"])
+                    kept_on_page_count += 1
+            elif kept_on_page_count < 2 and int(heading["level"][1:]) == 4 and len(heading["text"].split()) > 1: # If H4, ensure it's not too short
+                 if heading["text"] not in selected_heading_texts:
+                    initial_selection_for_coverage.append(heading)
+                    selected_heading_texts.add(heading["text"])
+                    kept_on_page_count += 1
 
-    # Rebuild the outline based on selected nodes
-    def rebuild_outline(nodes):
-        rebuilt_children = []
-        for node in nodes:
-            if node["_id"] in selected_nodes_ids:
-                rebuilt_node = node.copy()
-                rebuilt_node["children"] = rebuild_outline(node.get("children", []))
-                rebuilt_children.append(rebuilt_node)
-        return rebuilt_children
+        # If after checking all actual headings, the page still doesn't have at least one heading, add a generic placeholder
+        if kept_on_page_count == 0:
+            placeholder = {
+                "level": "H4",
+                "text": f"Page {page_num_0_indexed+1} Overview", # Display 1-indexed page number
+                "page": page_num_0_indexed # Store 0-indexed page number
+            }
+            if placeholder["text"] not in selected_heading_texts:
+                initial_selection_for_coverage.append(placeholder)
+                selected_heading_texts.add(placeholder["text"])
+                
+    # Now, `initial_selection_for_coverage` contains unique headings ensuring page coverage.
+    # We need to add back any other remaining headings that were classified (not just 1-2 per page)
+    # up to the `target_max_total_headings` limit.
 
-    return rebuild_outline(outline_nodes)
+    all_unique_classified_headings = {} # Map text to heading object for uniqueness and latest info
+    for heading in flat_headings: 
+        all_unique_classified_headings[heading["text"]] = heading # Overwrite with last seen if duplicates
+
+    # Ensure all headings from `initial_selection_for_coverage` are in the `final_pruned_list` first
+    final_pruned_list = []
+    for heading in initial_selection_for_coverage:
+        final_pruned_list.append(heading)
+
+    # Add remaining original classified headings (that were not selected in initial coverage pass)
+    # Prioritize them by level (H1-H4), then page, then text.
+    remaining_headings = []
+    for heading in all_unique_classified_headings.values():
+        if heading["text"] not in selected_heading_texts: 
+            remaining_headings.append(heading)
+    
+    remaining_headings.sort(key=lambda x: (int(x["level"][1:]), x["page"], x["text"]))
+    
+    # Add these remaining headings until `target_max_total_headings` is reached
+    for heading in remaining_headings:
+        if len(final_pruned_list) < target_max_total_headings:
+            final_pruned_list.append(heading)
+        else:
+            break # Stop if we hit the max limit
+
+    # Final pruning pass: If we still exceed the `target_max_total_headings`, remove lowest priority
+    while len(final_pruned_list) > target_max_total_headings:
+        # Sort by level (H4 highest priority for removal), then page (later pages first)
+        final_pruned_list.sort(key=lambda x: (int(x["level"][1:]), -x["page"]), reverse=True)
+        
+        # Remove the lowest priority heading (which is now at the end of the list)
+        removed_one = False
+        for idx in range(len(final_pruned_list) -1, -1, -1):
+            heading_to_consider = final_pruned_list[idx]
+            
+            # Count headings on this page that are of HIGHER priority or are protected H1/H2/H3
+            current_page_headings_count = 0
+            for h in final_pruned_list:
+                if h["page"] == heading_to_consider["page"] and h != heading_to_consider:
+                    current_page_headings_count += 1
+
+            # Only remove if its page still has more than the minimum allowed headings (e.g., 1 or 2)
+            # This logic needs to be careful to ensure 1-2 per page minimums are met for the final output.
+            # Here, `target_ideal_per_page` is 2. We'll ensure at least 1 heading per page after removal.
+            if current_page_headings_count >= 1: # If other headings remain on page, can remove
+                final_pruned_list.pop(idx)
+                removed_one = True
+                break
+        
+        if not removed_one: # If unable to remove more without violating min_per_page
+            break
+
+    # Final sort for output: by page, then by level, then by text
+    final_pruned_list.sort(key=lambda x: (x["page"], int(x["level"][1:]), x["text"]))
+
+    return final_pruned_list
 
 
 def run(classified_blocks, num_pages_total, pdf_filename_base="Untitled Document"):
     """
-    Reads classified blocks (in-memory), structures the outline, and prepares for title derivation.
-    Applies heading text truncation and outline length constraint.
-    num_pages_total: Total number of pages in the PDF, used for outline length constraint.
+    Reads classified blocks, structures the outline into a flat list,
+    applies heading text truncation, and prunes to meet length constraints.
     """
-    blocks = classified_blocks 
-
-    # --- Outline Structuring ---
-    headings = [b for b in blocks if b.get("level") and b["level"].startswith("H")]
-    headings.sort(key=itemgetter("page", "top")) 
-
-    root = {"level": 0, "children": []} 
-    path = [root] 
-
+    # Filter only blocks that were classified as headings
+    headings = [b for b in classified_blocks if b.get("level") and b["level"].startswith("H")]
+    
+    # Prepare outline nodes for pruning (flat list).
+    prepared_outline_nodes = []
     for heading in headings:
-        level = int(heading["level"][1:]) 
         node_text = heading["text"].strip()
-
+        
         # Apply "no text above 5 words into the outline text" constraint (truncation for display)
         if len(node_text.split()) > 5:
             node_text = " ".join(node_text.split()[:5]) + "..."
         
-        node = {
-            "level": level,
+        prepared_outline_nodes.append({
+            "level": heading["level"], 
             "text": node_text, 
-            "page": heading["page"],
-            "children": [],
-            "_id": id(heading) # Assign unique ID to node for pruning
-        }
-        
-        while path and path[-1]["level"] >= level:
-            path.pop()
-        
-        if not path:
-            path.append(root)
-        elif level > path[-1]["level"] + 1:
-            node["level"] = path[-1]["level"] + 1
-            level = node["level"] 
-
-        path[-1]["children"].append(node)
-        path.append(node)
-
-    # --- Final Outline Cleaning (recursive to prune empty/fix nested levels) ---
-    def clean_outline_recursive(nodes):
-        cleaned = []
-        for node in nodes:
-            if not node["text"].strip(): 
-                continue
-            
-            node["children"] = clean_outline_recursive(node["children"])
-            
-            if cleaned and node["level"] > cleaned[-1]["level"] + 1:
-                node["level"] = cleaned[-1]["level"] + 1
-            
-            cleaned.append(node)
-        return cleaned
+            "page": heading["page"] -1 # NEW: Adjust page number to be 0-indexed
+        })
     
-    final_outline = clean_outline_recursive(root["children"])
-
-    # --- Apply Outline Length Constraint (2-3 times number of pages) ---
-    # Using a multiplier of 3 (can be adjusted)
-    max_headings_allowed = 3 * num_pages_total
-    current_heading_count = _count_headings_in_outline(final_outline)
-
-    if current_heading_count > max_headings_allowed:
-        print(f"DEBUG: Outline too long ({current_heading_count} headings for {num_pages_total} pages). Pruning to {max_headings_allowed}.")
-        final_outline = _prune_outline_by_length_constraint(final_outline, max_headings_allowed)
-
+    # Apply outline pruning based on page coverage and level priority
+    final_pruned_outline = _prune_outline_for_length_and_page_coverage(prepared_outline_nodes, num_pages_total)
 
     return {
-        "outline": final_outline
+        "outline": final_pruned_outline
     }
