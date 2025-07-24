@@ -37,14 +37,4 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Project specific
-outputs/
-intermediates/
 
-# Include model wheel files but ignore downloaded models directory from spacy
-models/*.tar.gz
-models/.spacy/
-models/site-packages/
-
-# But keep the .whl files we want to include
-!models/*.whl
