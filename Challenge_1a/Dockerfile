@@ -26,10 +26,10 @@ COPY requirements.txt ./
 
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir --use-deprecated=legacy-resolver -r requirements.txt
+RUN python -m spacy download en_core_web_sm
+RUN python -m spacy download xx_ent_wiki_sm
 
-COPY *.py /app/
+COPY main.py /app/
+COPY pdf_utils/ /app/pdf_utils/
 
-RUN mkdir -p models/.cache && \
-    chmod 755 models
-
-RUN python setup.py
+CMD ["python","main.py"]

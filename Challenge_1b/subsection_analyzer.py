@@ -23,8 +23,8 @@ class SubsectionAnalyzer:
         """
         self.model_manager = model_manager or ModelManager()
         
-        # Download NLTK data if needed
-        self.model_manager.download_nltk_data()
+        # # Download NLTK data if needed
+        # self.model_manager.download_nltk_data()
         
         # Initialize semantic model for enhanced analysis
         self.semantic_model = None
