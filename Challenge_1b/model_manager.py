@@ -218,34 +218,32 @@ class ModelManager:
     
     def setup_enhanced_models(self):
         """
-        Download and setup the optimized enhanced model suite.
-        Total size: ~490MB with NLTK < 700MB limit
+        Download and setup the simplified optimized model suite.
+        Total size: ~410MB with NLTK < 500MB limit
         """
-        logger.info("Setting up enhanced optimized model suite...")
+        logger.info("Setting up simplified optimized model suite...")
         
         # Download NLTK data first
         self.download_nltk_data()
         
-        # Download all optimized models
-        enhanced_models = [
-            "sentence_transformer_best",    # 120MB - Best accuracy
-            "sentence_transformer_qa",      # 90MB - Q&A optimized
-            "sentence_transformer_domain",  # 90MB - Domain retrieval
-            "sentence_transformer_fast"     # 90MB - Fast processing
+        # Download only the 2 best models we actually use
+        optimized_models = [
+            "sentence_transformer_domain",   # 290MB - Best domain model
+            "sentence_transformer_general"   # 120MB - Best general model
         ]
         
-        for model_key in enhanced_models:
+        for model_key in optimized_models:
             try:
                 self.download_sentence_transformer(model_key)
                 logger.info(f"✅ Successfully setup {model_key}")
             except Exception as e:
                 logger.error(f"❌ Failed to setup {model_key}: {e}")
         
-        logger.info("Enhanced model suite setup complete!")
+        logger.info("Optimized model suite setup complete!")
         
         # Print system info
         info = self.get_system_info()
-        logger.info(f"Enhanced System Info: {json.dumps(info, indent=2)}")
+        logger.info(f"System Info: {json.dumps(info, indent=2)}")
     
     def setup_all_models(self, use_large_models: bool = False):
         """
@@ -262,8 +260,8 @@ class ModelManager:
             # Download NLTK data
             self.download_nltk_data()
             
-            # Download basic sentence transformer
-            self.download_sentence_transformer("sentence_transformer_fast")
+            # Download basic sentence transformer (general model)
+            self.download_sentence_transformer("sentence_transformer_general")
             
             logger.info("Basic models setup complete!")
             

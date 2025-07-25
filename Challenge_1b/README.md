@@ -136,12 +136,7 @@ python run.py \
 # Test system works
 python test.py
 
-# Validate competition constraints
-python test_constraints.py
 
-# Setup system optimization
-python setup_challenge1b.py
-```
 
 ## 🔧 System Architecture
 
@@ -238,7 +233,7 @@ Challenge_1b/
 ├── 🚀 Execution
 │   ├── run.py                    # Main script  
 │   ├── setup.py                  # One-time setup
-│   └── test*.py                  # Validation
+│                 # Validation
 └── 📚 Sample Data
     ├── input/                    # Your PDFs here
     ├── Collection 1/             # Travel guides
