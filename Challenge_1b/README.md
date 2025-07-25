@@ -266,10 +266,10 @@ Extract the most relevant content from document collections based on your specif
 ### 1️⃣ Prepare Your Environment
 
 - Open a terminal.
-- Create a new directory for this challenge (e.g., `Challenge_1a`):
+- Create a new directory for this challenge (e.g., `Challenge_1b`):
 
 ```bash
-mkdir -p Challenge_1a/input Challenge_1a/output
+mkdir -p Challenge_ba/input Challenge_1b/output
 cd Challenge_1a
 ```
 
@@ -299,7 +299,7 @@ sudo docker run --rm -v $(pwd)/input:/app/input:ro -v $(pwd)/output:/app/output 
 ## 📁 Directory Structure
 
 ```
-Challenge_1a/
+Challenge_1b/
 ├── input/      # ← Put your PDFs here!
 └── output/     # ← Results will be saved here!
 ```
