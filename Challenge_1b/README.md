@@ -255,6 +255,81 @@ Challenge_1b/
 4. **Results**: Check `challenge1b_output.json`
 
 **Need help?** Check the examples above or run `python run.py --help`
+# 🧠 Challenge 1A: Persona-Driven Document Intelligence (Docker Quickstart)
+
+**AI-powered document analysis that understands what YOU need!**
+
+Extract the most relevant content from document collections based on your specific persona and job requirements. Perfect for travel planners, researchers, trainers, and more!
+
+## 🚀 Quick Docker Start
+
+### 1️⃣ Prepare Your Environment
+
+- Open a terminal.
+- Create a new directory for this challenge (e.g., `Challenge_1a`):
+
+```bash
+mkdir -p Challenge_1a/input Challenge_1a/output
+cd Challenge_1a
+```
+
+### 2️⃣ Build the Docker Image
+
+Replace `<GHP token>` with your actual GitHub Personal Access Token.
+
+```bash
+sudo docker build --platform=linux/amd64 -t docdoc1a https://<GHP token>@github.com/kushagra8881/adobe_india_hackathon.git#main:Challenge_1a
+```
+
+### 3️⃣ Run the Analysis
+
+- Place your PDF files inside the `input/` directory.
+- The results will be saved to the `output/` directory.
+
+```bash
+sudo docker run --rm -v $(pwd)/input:/app/input:ro -v $(pwd)/output:/app/output --network none docdoc1a
+```
+
+### 4️⃣ Check Results
+
+- Output files will appear in `output/`.
+
+---
+
+## 📁 Directory Structure
+
+```
+Challenge_1a/
+├── input/      # ← Put your PDFs here!
+└── output/     # ← Results will be saved here!
+```
+
+---
+
+## ⚡ Performance Tips
+
+- Put 3-5 PDFs in the `input/` folder for best speed.
+- Use clear, specific persona and job descriptions (see Challenge 1B for examples).
+- Disable OCR unless needed (if that feature is available).
+- Use SSD storage for faster model/data loading.
+
+---
+
+## 🛠️ Troubleshooting
+
+- **"No PDFs found"**: Ensure your input PDFs are in the `input/` folder.
+- **"Permission denied"**: Fix permissions: `chmod 644 input/*.pdf`
+- **Model download/network error**: Ensure you have a working internet connection for the build step.
+
+---
+
+## 🎉 Need More?
+
+For advanced options, customization, and feature explanations, see the README in **Challenge_1b**.
+
+---
+
+*🧠 Challenge 1A: Fast, persona-driven document analysis, ready in seconds with Docker!*
 
 ---
 
