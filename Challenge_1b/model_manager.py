@@ -33,38 +33,26 @@ class ModelManager:
         self.models_dir = Path(models_dir)
         self.models_dir.mkdir(parents=True, exist_ok=True)
         
-        # Optimized Model configurations (Total: ~490MB with NLTK < 700MB limit)
+        # Simplified Best Models Configuration (2 models only)
         self.model_configs = {
-            "sentence_transformer_best": {
+            "sentence_transformer_domain": {
+                "name": "all-distilroberta-v1", 
+                "alternative": "sentence-transformers/all-distilroberta-v1",
+                "size_mb": 290,
+                "description": "Best domain understanding and retrieval model"
+            },
+            "sentence_transformer_general": {
                 "name": "all-MiniLM-L12-v2",
                 "alternative": "sentence-transformers/all-MiniLM-L12-v2", 
                 "size_mb": 120,
-                "description": "Best accuracy-to-size ratio sentence embedding model"
+                "description": "Best general purpose model with optimal accuracy"
             },
-            "sentence_transformer_qa": {
-                "name": "multi-qa-MiniLM-L6-cos-v1",
-                "alternative": "sentence-transformers/multi-qa-MiniLM-L6-cos-v1",
-                "size_mb": 90,
-                "description": "Optimized for question-answering tasks"
-            },
-            "sentence_transformer_domain": {
-                "name": "msmarco-MiniLM-L6-cos-v5", 
-                "alternative": "sentence-transformers/msmarco-MiniLM-L6-cos-v5",
-                "size_mb": 90,
-                "description": "Optimized for document retrieval and ranking"
-            },
-            "sentence_transformer_fast": {
-                "name": "all-MiniLM-L6-v2",
-                "alternative": "sentence-transformers/paraphrase-MiniLM-L6-v2",
-                "size_mb": 90,
-                "description": "Fast processing lightweight model"
-            },
-            # Legacy compatibility
+            # Legacy compatibility (points to general model)
             "sentence_transformer": {
-                "name": "all-MiniLM-L6-v2",
-                "alternative": "sentence-transformers/paraphrase-MiniLM-L6-v2", 
-                "size_mb": 90,
-                "description": "Default lightweight model (legacy)"
+                "name": "all-MiniLM-L12-v2",
+                "alternative": "sentence-transformers/all-MiniLM-L12-v2", 
+                "size_mb": 120,
+                "description": "Default general model (legacy)"
             }
         }
         
@@ -200,22 +188,27 @@ class ModelManager:
         Get the best model for a specific task type.
         
         Args:
-            task_type: Type of task ('general', 'qa', 'domain', 'fast')
+            task_type: Type of task ('general', 'domain')
             
         Returns:
             Model key for the best suited model
         """
+        # Simplified mapping - only 2 best models
         task_mapping = {
-            "general": "sentence_transformer_best",
-            "qa": "sentence_transformer_qa", 
-            "question_answering": "sentence_transformer_qa",
             "domain": "sentence_transformer_domain",
-            "retrieval": "sentence_transformer_domain",
-            "fast": "sentence_transformer_fast",
-            "speed": "sentence_transformer_fast"
+            "retrieval": "sentence_transformer_domain", 
+            "search": "sentence_transformer_domain",
+            "ranking": "sentence_transformer_domain",
+            "general": "sentence_transformer_general",
+            "qa": "sentence_transformer_general",
+            "question_answering": "sentence_transformer_general", 
+            "fast": "sentence_transformer_general",
+            "speed": "sentence_transformer_general",
+            "balanced": "sentence_transformer_general",
+            "analysis": "sentence_transformer_general"
         }
         
-        return task_mapping.get(task_type, "sentence_transformer_best")
+        return task_mapping.get(task_type, "sentence_transformer_general")
     
     def cleanup_old_models(self, keep_latest: int = 2):
         """Clean up old model versions to save disk space."""

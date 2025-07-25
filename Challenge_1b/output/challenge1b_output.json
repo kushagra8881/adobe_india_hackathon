@@ -1,0 +1,75 @@
+{
+    "metadata": {
+        "input_documents": [
+            "South of France - Cities.pdf",
+            "South of France - Cuisine.pdf",
+            "South of France - History.pdf",
+            "South of France - Restaurants and Hotels.pdf",
+            "South of France - Things to Do.pdf",
+            "South of France - Tips and Tricks.pdf",
+            "South of France - Traditions and Culture.pdf"
+        ],
+        "persona": "software developer",
+        "job_to_be_done": "learn segment trees implementation and applications",
+        "processing_timestamp": "2025-07-25T13:08:31.372304"
+    },
+    "extracted_sections": [
+        {
+            "document": "South of France - Cuisine.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 1,
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Cities.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 2,
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Things to Do.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 3,
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Restaurants and Hotels.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 4,
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Traditions and Culture.pdf",
+            "section_title": "Page 1",
+            "importance_rank": 5,
+            "page_number": 1
+        }
+    ],
+    "subsection_analysis": [
+        {
+            "document": "South of France - Cuisine.pdf",
+            "refined_text": "Take the time to chat with the vendors and learn about the local specialties. Take a wine tour to visit vineyards, taste local wines, and learn about the winemaking process. Visit an olive grove to learn about olive oil production and enjoy a tasting session. You'll have the chance to sample diﬀerent varieties of olive oil and learn about the nuances of flavor and aroma. Visit a local fromagerie (cheese shop) or a farm to sample these cheeses and learn about their production. Join a pastry workshop to learn how to make classic French pastries like croissants, éclairs, and macarons.",
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Cities.pdf",
+            "refined_text": "Whether you're planning a visit or simply want to learn more about this enchanting region, this guide will oﬀer valuable insights into each city's charm and allure. This area is renowned for its diverse landscapes, from the sun-drenched beaches of the French Riviera to the rolling vineyards of Provence and the rugged Pyrenees mountains. • Transportation: The region is well-connected by an extensive network of trains, buses, and flights. Renting a car is also a great option for exploring the countryside and smaller towns. Learning a few basic French phrases can enhance your travel experience.",
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Things to Do.pdf",
+            "refined_text": "• Grasse: Visit the perfume factories and learn about the history of fragrance production. Cooking Classes • Provence: Learn to prepare traditional dishes like ratatouille and bouillabaisse. • Sarlat: Join a foie gras workshop and learn to prepare this delicacy. • Fréjus: Cool oﬀ at Aqualand water park. • Various Locations: Try tree-top adventure parks with zip lines, rope bridges, and climbing challenges. • Carcassonne: Take a guided tour of the medieval citadel and learn about its history and architecture. • Nîmes: Visit the Roman amphitheater and learn about ancient Roman history.",
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Restaurants and Hotels.pdf",
+            "refined_text": "Reservations are a must due to its popularity and limited seating. The beachside location and casual vibe make it perfect for families. The outdoor seating and kid-friendly menu make it a great spot for families. The outdoor seating and kid-friendly menu make it a great spot for families. The relaxed setting and beautiful views make it a great spot for families. The artistic presentation and unique flavor combinations make it a culinary adventure. From the vibrant cities of Nice and Marseille to the charming villages of Provence, the South of France promises an unforgettable travel experience.",
+            "page_number": 1
+        },
+        {
+            "document": "South of France - Traditions and Culture.pdf",
+            "refined_text": "Wine and Vineyards The South of France is renowned for its wine production, with regions such as Provence, Languedoc, and the Rhône Valley producing some of the finest wines in the world. The fragrant flowers are harvested to produce a variety of products, including essential oils, soaps, and sachets. Visitors can also tour lavender farms and distilleries to learn about the production process. From the Provençal language and literature to the vibrant festivals and culinary delights, the region oﬀers a rich tapestry of customs and practices that continue to thrive today.",
+            "page_number": 1
+        }
+    ]
+}

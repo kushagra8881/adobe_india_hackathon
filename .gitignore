@@ -1,1 +1,94 @@
+# AI Models - Large files that shouldn't be in git (>5MB)
+Challenge_1a/models/
+Challenge_1b/models/
+challenge_1a/models/
 challenge_1b/models/
+Challenge - 1(a)/models/
+**/models/
+**/model_cache/
+
+# Model files by extension (>5MB)
+*.bin
+*.pkl
+*.model
+*.h5
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.tar.gz
+*.zip
+
+# Sentence Transformers models
+**/sentence-transformers/
+**/all-MiniLM*/
+**/all-distilroberta*/
+**/multi-qa-MiniLM*/
+**/paraphrase-MiniLM*/
+**/msmarco-MiniLM*/
+
+# NLTK data
+**/nltk_data/
+
+# HuggingFace cache
+**/.cache/huggingface/
+**/huggingface/
+**/.huggingface/
+
+# PyTorch models
+**/pytorch_model.bin
+**/model.safetensors
+**/config.json.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Virtual environments
+.env
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Large data files
+*.bin
+*.pkl
+*.model
+*.h5
+*.safetensors
+
+
+
+# Cache directories
+.cache/
+.pytest_cache/
+Challenge_1b/models/*/*.safetensors

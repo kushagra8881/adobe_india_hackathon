@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 """
 Document Intelligence System
-Extracts and prioritizes relevant sections from documents based on persona and job.
+Extracts and prioritizes relevant sections     # Initialize components with simplified best model selection
+    try:
+        logger.info("🔧 Initializing processing components...")
+        model_manager = ModelManager()
+        document_processor = DocumentProcessor(use_ocr=args.use_ocr)
+        
+        # Use best domain model for relevance ranking (all-distilroberta-v1)
+        relevance_ranker = RelevanceRanker(model_manager, task_type="domain")
+        
+        # Use best general model for subsection analysis (all-MiniLM-L12-v2) 
+        subsection_analyzer = SubsectionAnalyzer(model_manager)
+
+        logger.info("✅ Components initialized successfully")
+        logger.info("📊 Using optimized 2-model configuration:")
+        logger.info("   - Domain tasks: all-distilroberta-v1 (290MB)")
+        logger.info("   - General tasks: all-MiniLM-L12-v2 (120MB)")s based on persona and job.
 """
 import os
 import sys
@@ -97,12 +112,16 @@ def main():
 
     logger.info(f"📄 Found {len(pdf_files)} PDF files: {', '.join(pdf_files)}")
 
-    # Initialize components
+    # Initialize components with optimized model selection
     try:
         logger.info("🔧 Initializing processing components...")
         model_manager = ModelManager()
         document_processor = DocumentProcessor(use_ocr=args.use_ocr)
-        relevance_ranker = RelevanceRanker(model_manager)
+        
+        # Use domain-optimized model for relevance ranking (all-distilroberta-v1)
+        relevance_ranker = RelevanceRanker(model_manager, task_type="domain")
+        
+        # Use fast model for subsection analysis (paraphrase-MiniLM-L3-v2) 
         subsection_analyzer = SubsectionAnalyzer(model_manager)
 
         logger.info("✅ Components initialized successfully")
@@ -173,34 +192,45 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
-    # Create output structure
+    # Create output structure to match analysis.json format exactly
     total_processing_time = time.time() - start_time
+
+    # Transform ranked_sections to match expected format
+    formatted_sections = []
+    for section in ranked_sections:
+        formatted_sections.append({
+            "document": section["document"],
+            "section_title": section["section_title"],
+            "importance_rank": section["importance_rank"],
+            "page_number": section["page_number"]
+        })
+    
+    # Transform subsection_analysis to match expected format
+    formatted_analysis = []
+    for analysis in subsection_analysis:
+        formatted_analysis.append({
+            "document": analysis["document"],
+            "refined_text": analysis["refined_text"],
+            "page_number": analysis["page_number"]
+        })
 
     output = {
         "metadata": {
             "input_documents": pdf_files,
             "persona": args.persona,
             "job_to_be_done": args.job,
-            "processing_timestamp": datetime.now().isoformat(),
-            "processing_time_seconds": round(total_processing_time, 2),
-            "system_info": {
-                "models_used": {
-                    "sentence_transformer": "locally_cached" if model_manager.is_model_downloaded("sentence_transformer") else "remote",
-                    "use_ocr": args.use_ocr
-                },
-                "documents_processed": len(documents),
-                "total_sections_found": sum(len(doc.get("sections", [])) for doc in documents)
-            }
+            "processing_timestamp": datetime.now().isoformat()
         },
-        "extracted_sections": ranked_sections,
-        "subsection_analysis": subsection_analysis
+        "extracted_sections": formatted_sections,
+        "subsection_analysis": formatted_analysis
     }
 
     # Write output to file
     try:
-        with open(f"./output/out_{datetime.now().isoformat()}.json", 'w', encoding='utf-8') as f:
+        output_filename = "./output/challenge1b_output.json"
+        with open(output_filename, 'w', encoding='utf-8') as f:
             json.dump(output, f, indent=4, ensure_ascii=False)
-        logger.info("Output written to ./output/out_#.json")
+        logger.info(f"Output written to {output_filename}")
 
     except Exception as e:
         logger.error(f"Error writing output file: {str(e)}")
