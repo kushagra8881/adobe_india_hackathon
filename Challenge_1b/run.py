@@ -108,7 +108,7 @@ def main():
         sys.exit(1)
 
     # Ensure output directory exists
-    ensure_dir_exists(f"./output/out_{datetime.now().isoformat()}.json")
+    ensure_dir_exists("./output/challenge1b_output.json")
 
     logger.info(f"📄 Found {len(pdf_files)} PDF files: {', '.join(pdf_files)}")
 

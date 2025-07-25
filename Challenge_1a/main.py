@@ -28,8 +28,8 @@ from pdf_utils import (
 )
 
 # --- Configuration ---
-INPUT_DIR = os.path.join(script_dir, "inputs")
-OUTPUT_DIR = os.path.join(script_dir, "outputs")
+INPUT_DIR = os.path.join(script_dir, "input")
+OUTPUT_DIR = os.path.join(script_dir, "output")
 INTERMEDIATES_SUBDIR = "intermediates" 
 
 def _process_and_truncate_title(raw_title: str, processed_blocks: list, filename_base: str, detected_lang: str) -> str:

@@ -1,11 +1,7 @@
 # AI Models - Large files that shouldn't be in git (>5MB)
-Challenge_1a/models/
+# Challenge_1a/models/
 Challenge_1b/models/
-challenge_1a/models/
 challenge_1b/models/
-Challenge - 1(a)/models/
-**/models/
-**/model_cache/
 
 # Model files by extension (>5MB)
 *.bin
