@@ -345,8 +345,8 @@ Few or no headings detected in structured document
 
 ### Processing Speed (Intel i7, 16GB RAM)
 - **Small PDFs** (1-10 pages): 2-4 seconds
-- **Medium PDFs** (11-30 pages): 4-8 seconds  
-- **Large PDFs** (31-50 pages): 8-15 seconds
+- **Medium PDFs** (11-30 pages): 4-6 seconds  
+- **Large PDFs** (31-50 pages): 6-9.88 seconds
 
 ### Accuracy Benchmarks
 - **Heading Detection**: 85-95% on structured documents
