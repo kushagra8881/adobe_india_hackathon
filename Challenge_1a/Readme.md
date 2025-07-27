@@ -11,6 +11,40 @@ This project processes PDF documents to automatically generate structured outlin
 - **Hierarchical outline structuring** with logical flow validation
 - **Automated title derivation** from document content analysis
 
+## 🧠 **Technical Approach**
+
+### Core Methodology
+Our solution employs a **hybrid approach** combining:
+
+1. **Rule-Based Heuristics**: Dynamic font size analysis, positioning, and formatting patterns
+2. **NLP-Powered Intelligence**: Multilingual text analysis for content quality and semantic understanding
+3. **Contextual Feature Engineering**: 15+ features including font prominence, centering, gaps, and text properties
+4. **Adaptive Thresholding**: Document-specific font size thresholds for heading classification
+
+### Key Innovations
+- **Language-Aware Processing**: Automatic script detection (CJK vs Latin vs Arabic) with tailored handling
+- **Intelligent Fragment Merging**: Combines broken text spans, unclosed brackets, and line-wrapped content
+- **Multi-Strategy Title Extraction**: Content analysis combined with metadata for meaningful titles
+- **Hierarchical Validation**: Ensures logical H1→H2→H3→H4 flow with gap analysis
+
+### Models & Libraries Used
+
+| Component | Library/Model | Version | Purpose |
+|-----------|---------------|---------|---------|
+| **PDF Processing** | PyMuPDF (fitz) | 1.24.1 | Text extraction, font analysis, layout detection |
+| **Language Detection** | SpaCy + spacy-langdetect | 3.7.4 | Multilingual document language identification |
+| **Multilingual NLP** | xx_ent_wiki_sm | 3.7.0 | Universal language model for text analysis |
+| **English NLP** | en_core_web_sm | 3.7.1 | Enhanced English text processing |
+| **Machine Learning** | scikit-learn | Latest | Feature engineering and text vectorization |
+| **Text Processing** | NumPy, Pandas | Latest | Numerical analysis and data manipulation |
+| **Progress Tracking** | tqdm | 4.66.2 | User-friendly progress bars |
+
+### Architecture Benefits
+- **Offline Operation**: All models embedded in container (no internet required)
+- **Language Agnostic**: Handles 15+ languages with script-specific optimizations
+- **Scalable**: Efficient batch processing with memory management
+- **Robust**: Graceful degradation when models unavailable
+
 ### Key Features
 
 ✅ **Multilingual Support** - Handles English, CJK (Chinese/Japanese/Korean), Arabic, Cyrillic, and more  
@@ -109,6 +143,35 @@ Challenge_1a/
 
 3. **Check results** in the `outputs/` directory
 
+## 🏆 **Official Build & Run Instructions**
+
+**For evaluation and testing purposes, follow these exact steps:**
+
+### Building the Solution
+```bash
+# Clone the repository
+git clone https://github.com/kushagra8881/adobe_india_hackathon.git
+cd adobe_india_hackathon/Challenge_1a
+
+# Build Docker container
+docker build -t pdf-outline-extractor .
+```
+
+### Running the Solution
+```bash
+# Ensure input directory exists with PDF files
+mkdir -p inputs outputs
+
+# Run the container (processes all PDFs in inputs/, outputs to outputs/)
+docker run -v $(pwd)/inputs:/app/inputs -v $(pwd)/outputs:/app/outputs pdf-outline-extractor
+```
+
+### Expected Execution
+- **Input**: PDF files placed in `inputs/` directory
+- **Processing**: Automatic batch processing of all PDFs
+- **Output**: JSON files with same basename as input PDFs in `outputs/` directory
+- **Format**: Each JSON contains `{"title": "...", "outline": [...]}`
+
 ### Docker Deployment (Recommended)
 
 1. **Build the container**
@@ -118,8 +181,20 @@ Challenge_1a/
 
 2. **Run with volume mapping**
    ```bash
-   docker run -v /path/to/pdfs:/app/inputs -v /path/to/outputs:/app/outputs pdf-outline-extractor
+   # Linux/macOS
+   docker run -v $(pwd)/inputs:/app/inputs -v $(pwd)/outputs:/app/outputs pdf-outline-extractor
+   
+   # Windows (PowerShell)
+   docker run -v ${PWD}/inputs:/app/inputs -v ${PWD}/outputs:/app/outputs pdf-outline-extractor
+   
+   # Windows (Command Prompt)
+   docker run -v %cd%/inputs:/app/inputs -v %cd%/outputs:/app/outputs pdf-outline-extractor
    ```
+
+3. **Expected execution flow**
+   - Container will automatically process all PDFs in mounted `/app/inputs`
+   - Results will be written to mounted `/app/outputs`
+   - Each PDF generates a corresponding JSON file with same basename
 
 ## 📊 Output Format
 
