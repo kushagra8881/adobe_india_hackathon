@@ -17,99 +17,123 @@ This project processes PDF documents to automatically generate structured outlin
 - Python 3.10+
 - 8GB+ RAM (for NLP models)
 - Docker (optional, for containerized deployment)
+Here is your improved and cleaned-up content in **Markdown (`.md`) format**, suitable for a `README.md` or documentation file:
 
-### Local Installation
+```markdown
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/kushagra8881/adobe_india_hackathon.git
-   cd adobe_india_hackathon/Challenge_1a
-   ```
 
-2. **Set up Python environment**
-   ```bash
-   python -m venv foradobe
-   source foradobe/bin/activate  # On Windows: foradobe\\Scripts\\activate
-   ```
+---
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🧰 Local Installation
 
-4. **Download SpaCy models** (if not using Docker)
-   ```bash
-   python download_models.py
-   ```
-
-### Usage
-
-1. **Place PDF files** in the `inputs/` directory
-
-2. **Run the processor**
-   ```bash
-   python main.py
-   ```
-
-3. **Check results** in the `outputs/` directory
-
-## 🏆 **Official Build & Run Instructions**
-
-**For evaluation and testing purposes, follow these exact steps:**
-
-### Building the Solution
+### 1. Clone the Repository
 ```bash
-# method 1
-
-# Clone the repository
 git clone https://github.com/kushagra8881/adobe_india_hackathon.git
 cd adobe_india_hackathon/Challenge_1a
+```
 
-# Build Docker container
+### 2. Set Up Python Environment
+```bash
+python -m venv foradobe
+
+```
+
+### 3. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Download SpaCy Models (for NLP)
+```bash
+python download_models.py
+```
+
+---
+
+## 🚀 Usage (Local)
+
+### 1. Add PDF Files
+Place your `.pdf` files in the `inputs/` directory.
+
+### 2. Run the Processor
+```bash
+python main.py
+```
+
+### 3. View the Results
+Output `.json` files will be generated in the `outputs/` directory, formatted as:
+```json
+{
+  "title": "Extracted Title",
+  "outline": [
+    {"level": 1, "text": "Heading 1"},
+    {"level": 2, "text": "Subheading 1.1"},
+    ...
+  ]
+}
+```
+
+---
+
+## 🐳 Docker Deployment (Recommended)
+
+### 🔧 Build the Docker Image
+
+**Method 1: Manual Build**
+```bash
 docker build -t pdf-outline-extractor .
+```
 
-# method 2
+**Method 2: Direct from GitHub**
+```bash
 docker build --platform=linux/amd64 -t docdoc1a https://github.com/kushagra8881/adobe_india_hackathon.git#main:Challenge_1a
 ```
 
-### Running the Solution
-```bash
-# Ensure input directory exists with PDF files
-mkdir -p inputs outputs
+---
 
-# Run the container (processes all PDFs in inputs/, outputs to outputs/)
+### ▶️ Run the Container
+
+Ensure `inputs/` and `outputs/` directories exist:
+
+```bash
+mkdir -p inputs outputs
+```
+
+Run the container:
+
+#### On Linux/macOS:
+```bash
 docker run -v $(pwd)/inputs:/app/inputs -v $(pwd)/outputs:/app/outputs pdf-outline-extractor
 ```
 
-### Expected Execution
-- **Input**: PDF files placed in `inputs/` directory
-- **Processing**: Automatic batch processing of all PDFs
-- **Output**: JSON files with same basename as input PDFs in `outputs/` directory
-- **Format**: Each JSON contains `{"title": "...", "outline": [...]}`
+#### On Windows (PowerShell):
+```bash
+docker run -v ${PWD}/inputs:/app/inputs -v ${PWD}/outputs:/app/outputs pdf-outline-extractor
+```
 
-### Docker Deployment (Recommended)
+#### On Windows (Command Prompt):
+```bash
+docker run -v %cd%/inputs:/app/inputs -v %cd%/outputs:/app/outputs pdf-outline-extractor
+```
 
-1. **Build the container**
-   ```bash
-   docker build -t pdf-outline-extractor .
-   ```
+---
 
-2. **Run with volume mapping**
-   ```bash
-   # Linux/macOS
-   docker run -v $(pwd)/inputs:/app/inputs -v $(pwd)/outputs:/app/outputs pdf-outline-extractor
-   
-   # Windows (PowerShell)
-   docker run -v ${PWD}/inputs:/app/inputs -v ${PWD}/outputs:/app/outputs pdf-outline-extractor
-   
-   # Windows (Command Prompt)
-   docker run -v %cd%/inputs:/app/inputs -v %cd%/outputs:/app/outputs pdf-outline-extractor
-   ```
+## 📦 Expected Execution Flow
 
-3. **Expected execution flow**
-   - Container will automatically process all PDFs in mounted `/app/inputs`
-   - Results will be written to mounted `/app/outputs`
-   - Each PDF generates a corresponding JSON file with same basename
+- **Input**: PDF files placed in the `inputs/` directory
+- **Processing**: Automatic batch extraction of outlines and titles
+- **Output**: `.json` files with the same basename in the `outputs/` directory
+
+---
+
+## 🏁 Sample Output
+
+Given `example.pdf`, the tool will produce:
+```json
+outputs/example.json
+```
+
+---
 ## 🧠 **Technical Approach**
 
 ### Core Methodology
@@ -345,8 +369,8 @@ Few or no headings detected in structured document
 
 ### Processing Speed (Intel i7, 16GB RAM)
 - **Small PDFs** (1-10 pages): 2-4 seconds
-- **Medium PDFs** (11-30 pages): 4-6 seconds  
-- **Large PDFs** (31-50 pages): 6-9.88 seconds
+- **Medium PDFs** (11-30 pages): 4-8 seconds  
+- **Large PDFs** (31-50 pages): 8-15 seconds
 
 ### Accuracy Benchmarks
 - **Heading Detection**: 85-95% on structured documents
