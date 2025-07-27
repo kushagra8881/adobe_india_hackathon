@@ -1,6 +1,6 @@
 # 🧠 Challenge 1B: Persona-Driven Document Intelligence
 
-**AI-### 📚 For Students/Developersowered document analysis that understands what YOU need!** 
+**AI-### 📚 For Students/Developers document analysis that understands what YOU need!** 
 
 Extract the most relevant content fro## 📈 Performance Tips document collections based on your specific persona and job requirements. Perfect for travel planners, researchers, trainers, and more!
 
