@@ -323,11 +323,6 @@ Challenge_1b/
 
 ---
 
-## 🎉 Need More?
-
-For advanced options, customization, and feature explanations, see the README in **Challenge_1b**.
-
----
 
 
 ---
