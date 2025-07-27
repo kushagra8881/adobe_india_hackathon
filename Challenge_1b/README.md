@@ -278,7 +278,7 @@ cd Challenge_1b
 Replace `<GHP token>` with your actual GitHub Personal Access Token.
 
 ```bash
-sudo docker build --platform=linux/amd64 -t docdoc1b https://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@github.com/kushagra8881/adobe_india_hackathon.git#main:Challenge_1b
+sudo docker build --platform=linux/amd64 -t docdoc1b https://github.com/kushagra8881/adobe_india_hackathon.git#main:Challenge_1b
 ```
 
 ### 3️⃣ Run the Analysis
