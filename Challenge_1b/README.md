@@ -278,7 +278,7 @@ cd Challenge_1a
 Replace `<GHP token>` with your actual GitHub Personal Access Token.
 
 ```bash
-sudo docker build --platform=linux/amd64 -t docdoc1a https://<GHP token>@github.com/kushagra8881/adobe_india_hackathon.git#main:Challenge_1a
+sudo docker build --platform=linux/amd64 -t docdoc1b https://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@github.com/kushagra8881/adobe_india_hackathon.git#main:Challenge_1b
 ```
 
 ### 3️⃣ Run the Analysis
@@ -287,7 +287,7 @@ sudo docker build --platform=linux/amd64 -t docdoc1a https://<GHP token>@github.
 - The results will be saved to the `output/` directory.
 
 ```bash
-sudo docker run --rm -v $(pwd)/input:/app/input:ro -v $(pwd)/output:/app/output --network none docdoc1a
+sudo docker run --rm --network none -v $(pwd)/input/:/app/input/ -v $(pwd)/output/:/app/output/ docdoc1b python run.py --persona "student" --job "build method"
 ```
 
 ### 4️⃣ Check Results
