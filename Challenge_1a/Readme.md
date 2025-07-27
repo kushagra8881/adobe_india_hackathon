@@ -10,96 +10,6 @@ This project processes PDF documents to automatically generate structured outlin
 - **Smart heading classification** using heuristic scoring and font analysis
 - **Hierarchical outline structuring** with logical flow validation
 - **Automated title derivation** from document content analysis
-
-## 🧠 **Technical Approach**
-
-### Core Methodology
-Our solution employs a **hybrid approach** combining:
-
-1. **Rule-Based Heuristics**: Dynamic font size analysis, positioning, and formatting patterns
-2. **NLP-Powered Intelligence**: Multilingual text analysis for content quality and semantic understanding
-3. **Contextual Feature Engineering**: 15+ features including font prominence, centering, gaps, and text properties
-4. **Adaptive Thresholding**: Document-specific font size thresholds for heading classification
-
-### Key Innovations
-- **Language-Aware Processing**: Automatic script detection (CJK vs Latin vs Arabic) with tailored handling
-- **Intelligent Fragment Merging**: Combines broken text spans, unclosed brackets, and line-wrapped content
-- **Multi-Strategy Title Extraction**: Content analysis combined with metadata for meaningful titles
-- **Hierarchical Validation**: Ensures logical H1→H2→H3→H4 flow with gap analysis
-
-### Models & Libraries Used
-
-| Component | Library/Model | Version | Purpose |
-|-----------|---------------|---------|---------|
-| **PDF Processing** | PyMuPDF (fitz) | 1.24.1 | Text extraction, font analysis, layout detection |
-| **Language Detection** | SpaCy + spacy-langdetect | 3.7.4 | Multilingual document language identification |
-| **Multilingual NLP** | xx_ent_wiki_sm | 3.7.0 | Universal language model for text analysis |
-| **English NLP** | en_core_web_sm | 3.7.1 | Enhanced English text processing |
-| **Machine Learning** | scikit-learn | Latest | Feature engineering and text vectorization |
-| **Text Processing** | NumPy, Pandas | Latest | Numerical analysis and data manipulation |
-| **Progress Tracking** | tqdm | 4.66.2 | User-friendly progress bars |
-
-### Architecture Benefits
-- **Offline Operation**: All models embedded in container (no internet required)
-- **Language Agnostic**: Handles 15+ languages with script-specific optimizations
-- **Scalable**: Efficient batch processing with memory management
-- **Robust**: Graceful degradation when models unavailable
-
-### Key Features
-
-✅ **Multilingual Support** - Handles English, CJK (Chinese/Japanese/Korean), Arabic, Cyrillic, and more  
-✅ **Advanced Text Analysis** - NLP-powered content quality assessment and fragment merging  
-✅ **Smart Classification** - Dynamic font threshold analysis with contextual feature scoring  
-✅ **Dockerized Deployment** - Production-ready container with offline SpaCy models  
-✅ **Batch Processing** - Process multiple PDFs with progress tracking and error handling  
-✅ **Structured Output** - Clean JSON format with title and hierarchical outline  
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   PDF Input     │───▶│  Text Extraction │───▶│ Language Detection│
-│   Documents     │    │   (PyMuPDF)      │    │   (SpaCy NLP)   │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                                                         │
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Final JSON     │◀───│ Outline Building │◀───│ Heading Analysis│
-│   Output        │    │  & Structuring   │    │ & Classification│
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-```
-
-### Processing Pipeline
-
-1. **Initial Sampling** - Extract text from first 5 pages for language detection
-2. **Language Detection** - Identify document language using SpaCy models
-3. **Full Text Extraction** - Process entire document with language-aware filtering
-4. **Text Block Analysis** - Merge fragments and analyze line structures
-5. **Heading Classification** - Multi-factor scoring with dynamic font thresholds
-6. **Title Derivation** - Extract meaningful document title from content
-7. **Outline Structuring** - Build hierarchical outline with logical validation
-8. **Output Generation** - Create structured JSON with title and outline
-
-## 📁 Project Structure
-
-```
-Challenge_1a/
-├── main.py                 # Main processing orchestrator
-├── requirements.txt        # Python dependencies
-├── Dockerfile             # Container configuration with offline models
-├── download_models.py     # SpaCy model downloader utility
-├── inputs/                # PDF files to process
-├── outputs/               # Generated JSON results
-├── models/                # SpaCy model wheel files (27MB total)
-│   ├── xx_ent_wiki_sm-3.7.0-py3-none-any.whl    # Multilingual model (15MB)
-│   └── en_core_web_sm-3.7.1-py3-none-any.whl    # English model (12MB)
-└── pdf_utils/             # Core processing modules
-    ├── __init__.py
-    ├── extract_blocks.py      # Text extraction & intelligent merging
-    ├── language.py           # Multilingual detection & NLP models
-    ├── classify_headings.py  # Advanced heading classification
-    └── structure_outline.py  # Outline structuring & title derivation
-```
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -200,6 +110,96 @@ docker run -v $(pwd)/inputs:/app/inputs -v $(pwd)/outputs:/app/outputs pdf-outli
    - Container will automatically process all PDFs in mounted `/app/inputs`
    - Results will be written to mounted `/app/outputs`
    - Each PDF generates a corresponding JSON file with same basename
+## 🧠 **Technical Approach**
+
+### Core Methodology
+Our solution employs a **hybrid approach** combining:
+
+1. **Rule-Based Heuristics**: Dynamic font size analysis, positioning, and formatting patterns
+2. **NLP-Powered Intelligence**: Multilingual text analysis for content quality and semantic understanding
+3. **Contextual Feature Engineering**: 15+ features including font prominence, centering, gaps, and text properties
+4. **Adaptive Thresholding**: Document-specific font size thresholds for heading classification
+
+### Key Innovations
+- **Language-Aware Processing**: Automatic script detection (CJK vs Latin vs Arabic) with tailored handling
+- **Intelligent Fragment Merging**: Combines broken text spans, unclosed brackets, and line-wrapped content
+- **Multi-Strategy Title Extraction**: Content analysis combined with metadata for meaningful titles
+- **Hierarchical Validation**: Ensures logical H1→H2→H3→H4 flow with gap analysis
+
+### Models & Libraries Used
+
+| Component | Library/Model | Version | Purpose |
+|-----------|---------------|---------|---------|
+| **PDF Processing** | PyMuPDF (fitz) | 1.24.1 | Text extraction, font analysis, layout detection |
+| **Language Detection** | SpaCy + spacy-langdetect | 3.7.4 | Multilingual document language identification |
+| **Multilingual NLP** | xx_ent_wiki_sm | 3.7.0 | Universal language model for text analysis |
+| **English NLP** | en_core_web_sm | 3.7.1 | Enhanced English text processing |
+| **Machine Learning** | scikit-learn | Latest | Feature engineering and text vectorization |
+| **Text Processing** | NumPy, Pandas | Latest | Numerical analysis and data manipulation |
+| **Progress Tracking** | tqdm | 4.66.2 | User-friendly progress bars |
+
+### Architecture Benefits
+- **Offline Operation**: All models embedded in container (no internet required)
+- **Language Agnostic**: Handles 15+ languages with script-specific optimizations
+- **Scalable**: Efficient batch processing with memory management
+- **Robust**: Graceful degradation when models unavailable
+
+### Key Features
+
+✅ **Multilingual Support** - Handles English, CJK (Chinese/Japanese/Korean), Arabic, Cyrillic, and more  
+✅ **Advanced Text Analysis** - NLP-powered content quality assessment and fragment merging  
+✅ **Smart Classification** - Dynamic font threshold analysis with contextual feature scoring  
+✅ **Dockerized Deployment** - Production-ready container with offline SpaCy models  
+✅ **Batch Processing** - Process multiple PDFs with progress tracking and error handling  
+✅ **Structured Output** - Clean JSON format with title and hierarchical outline  
+
+## 🏗️ Architecture
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   PDF Input     │───▶│  Text Extraction │───▶│ Language Detection│
+│   Documents     │    │   (PyMuPDF)      │    │   (SpaCy NLP)   │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Final JSON     │◀───│ Outline Building │◀───│ Heading Analysis│
+│   Output        │    │  & Structuring   │    │ & Classification│
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+### Processing Pipeline
+
+1. **Initial Sampling** - Extract text from first 5 pages for language detection
+2. **Language Detection** - Identify document language using SpaCy models
+3. **Full Text Extraction** - Process entire document with language-aware filtering
+4. **Text Block Analysis** - Merge fragments and analyze line structures
+5. **Heading Classification** - Multi-factor scoring with dynamic font thresholds
+6. **Title Derivation** - Extract meaningful document title from content
+7. **Outline Structuring** - Build hierarchical outline with logical validation
+8. **Output Generation** - Create structured JSON with title and outline
+
+## 📁 Project Structure
+
+```
+Challenge_1a/
+├── main.py                 # Main processing orchestrator
+├── requirements.txt        # Python dependencies
+├── Dockerfile             # Container configuration with offline models
+├── download_models.py     # SpaCy model downloader utility
+├── inputs/                # PDF files to process
+├── outputs/               # Generated JSON results
+├── models/                # SpaCy model wheel files (27MB total)
+│   ├── xx_ent_wiki_sm-3.7.0-py3-none-any.whl    # Multilingual model (15MB)
+│   └── en_core_web_sm-3.7.1-py3-none-any.whl    # English model (12MB)
+└── pdf_utils/             # Core processing modules
+    ├── __init__.py
+    ├── extract_blocks.py      # Text extraction & intelligent merging
+    ├── language.py           # Multilingual detection & NLP models
+    ├── classify_headings.py  # Advanced heading classification
+    └── structure_outline.py  # Outline structuring & title derivation
+```
+
+
 
 ## 📊 Output Format
 
