@@ -22,12 +22,14 @@ Extract the most relevant content fro## 📈 Performance Tips document collectio
 
 ## 🚀 Quick Start
 
-## � Quick Start
+
 
 ### 1️⃣ Setup (One Time)
 ```bash
+git clone https://github.com/kushagra8881/adobe_india_hackathon.git
+
 # Navigate to Challenge 1B
-cd Challenge_1b
+cd adobe_india_hackathon/Challenge_1b
 
 # Install dependencies and download AI models
 python setup.py
