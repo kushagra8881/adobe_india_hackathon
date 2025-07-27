@@ -270,7 +270,7 @@ Extract the most relevant content from document collections based on your specif
 
 ```bash
 mkdir -p Challenge_ba/input Challenge_1b/output
-cd Challenge_1a
+cd Challenge_1b
 ```
 
 ### 2️⃣ Build the Docker Image
@@ -329,7 +329,6 @@ For advanced options, customization, and feature explanations, see the README in
 
 ---
 
-*🧠 Challenge 1A: Fast, persona-driven document analysis, ready in seconds with Docker!*
 
 ---
 
